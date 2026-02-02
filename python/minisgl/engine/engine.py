@@ -2,8 +2,14 @@ from __future__ import annotations
 
 from datetime import timedelta
 from typing import Dict, NamedTuple, Tuple
+import gc
 
 import torch
+import torch_xla
+import torch_xla.core.xla_model as xm
+import torch_xla.debug.metrics as met
+
+
 from minisgl.attention import create_attention_backend
 from minisgl.core import Batch, Context, Req, set_global_ctx
 from minisgl.distributed import destroy_distributed, enable_pynccl_distributed, set_tp_info
@@ -38,11 +44,10 @@ class Engine:
         self.model_config = config.model_config
         set_tp_info(rank=config.tp_info.rank, size=config.tp_info.size)
 
-        assert not torch.cuda.is_initialized()
-        self.device = torch.device(f"cuda:{config.tp_info.rank}")
-        torch.cuda.set_device(self.device)
-        self.stream = torch.cuda.Stream()
-        torch.cuda.set_stream(self.stream)
+        self.device = torch.device(f"xla:{config.tp_info.rank}") #
+        #torch.cuda.set_device(self.device)
+        #self.stream = torch.cuda.Stream()
+        #torch.cuda.set_stream(self.stream)
         self.dtype = config.dtype
 
         self.tp_cpu_group = self._init_communication(config)
@@ -67,12 +72,12 @@ class Engine:
             (config.max_running_req + 1, self.max_seq_len),
             device=self.device,
         )
-        self.attn_backend = create_attention_backend(
-            config.attention_backend,
-            config.model_config,
-            self.kv_cache,
-            self.page_table,
-        )
+        #self.attn_backend = create_attention_backend(
+        #    config.attention_backend,
+        #    config.model_config,
+        #    self.kv_cache,
+        #    self.page_table,
+        #)
         self.ctx = Context(page_size=1, attn_backend=self.attn_backend)
         set_global_ctx(self.ctx)
         self.sampler = Sampler(self.device, self.model_config.vocab_size)
@@ -105,30 +110,30 @@ class Engine:
         )
 
     def _init_communication(self, config: EngineConfig) -> torch.distributed.ProcessGroup:
-        if config.tp_info.size == 1 or config.use_pynccl:
-            torch.distributed.init_process_group(
-                backend="gloo",
-                rank=config.tp_info.rank,
-                world_size=config.tp_info.size,
-                timeout=timedelta(seconds=config.distributed_timeout),
-                init_method=config.distributed_addr,
-            )
-            tp_cpu_group = torch.distributed.group.WORLD
-            assert tp_cpu_group is not None
-            max_bytes = (
-                config.max_forward_len * config.model_config.hidden_size * self.dtype.itemsize
-            )
-            enable_pynccl_distributed(config.tp_info, tp_cpu_group, max_bytes)
-        else:
-            torch.distributed.init_process_group(
-                backend="nccl",
-                rank=config.tp_info.rank,
-                world_size=config.tp_info.size,
-                timeout=timedelta(seconds=config.distributed_timeout),
-                init_method=config.distributed_addr,
-            )
-            tp_cpu_group = torch.distributed.new_group(backend="gloo")
-            assert tp_cpu_group is not None
+        #if config.tp_info.size == 1 or config.use_pynccl:
+        #    torch.distributed.init_process_group(
+        #        backend="gloo",
+        #        rank=config.tp_info.rank,
+        #        world_size=config.tp_info.size,
+        #        timeout=timedelta(seconds=config.distributed_timeout),
+        #        init_method=config.distributed_addr,
+        #    )
+        #    tp_cpu_group = torch.distributed.group.WORLD
+        #    assert tp_cpu_group is not None
+        #    max_bytes = (
+        #        config.max_forward_len * config.model_config.hidden_size * self.dtype.itemsize
+        #    )
+        #    enable_pynccl_distributed(config.tp_info, tp_cpu_group, max_bytes)
+        #else:
+        torch.distributed.init_process_group(
+            backend="xla",
+            rank=config.tp_info.rank,
+            world_size=config.tp_info.size,
+            timeout=timedelta(seconds=config.distributed_timeout),
+            init_method=config.distributed_addr,
+        )
+        tp_cpu_group = torch.distributed.new_group(backend="gloo")
+        assert tp_cpu_group is not None
         return tp_cpu_group
 
     def _load_weight_state_dict(self, config: EngineConfig) -> Dict[str, torch.Tensor]:
@@ -166,9 +171,14 @@ class Engine:
 
     def _sync_get_memory(self) -> Tuple[int, int]:
         """Get the min and max free memory across TP ranks."""
-        torch.cuda.synchronize(self.device)
-        torch.cuda.empty_cache()
-        torch.cuda.reset_peak_memory_stats(self.device)
+        #torch.cuda.synchronize(self.device)
+        #torch.cuda.empty_cache()
+        #torch.cuda.reset_peak_memory_stats(self.device)
+        torch_xla.sync()
+        xm.wait_device_ops()
+        gc.collct()
+        met.clear_metrics() 
+
         free_memory = get_free_memory(self.device)
         free_mem_tensor = torch.tensor([free_memory, -free_memory], device="cpu", dtype=torch.int64)
         torch.distributed.all_reduce(
@@ -188,10 +198,10 @@ class Engine:
     def forward_batch(self, batch: Batch, args: BatchSamplingArgs) -> ForwardOutput:
         assert torch.cuda.current_stream() == self.stream
         with self.ctx.forward_batch(batch):
-            if self.graph_runner.can_use_cuda_graph(batch):
-                logits = self.graph_runner.replay(batch)
-            else:
-                logits = self.model.forward()
+            #if self.graph_runner.can_use_cuda_graph(batch):
+            #    logits = self.graph_runner.replay(batch)
+            #else:
+            logits = self.model.forward()
 
         for req in batch.reqs:
             req.complete_one()
@@ -203,6 +213,6 @@ class Engine:
         return ForwardOutput(next_tokens_gpu, next_tokens_cpu, copy_done_event)
 
     def shutdown(self) -> None:
-        self.graph_runner.destroy_cuda_graphs()
+        #self.graph_runner.destroy_cuda_graphs()
         torch.distributed.destroy_process_group()
         destroy_distributed()

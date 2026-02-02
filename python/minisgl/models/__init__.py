@@ -8,15 +8,45 @@ from .weight import load_hf_weight
 def create_model(model_path: str, model_config: ModelConfig) -> BaseLLMModel:
     model_name = model_path.lower()
     if "llama" in model_name:
-        from .llama import LlamaForCausalLM
+        #from .llama import NeuLlamaForCausalLM
 
-        return LlamaForCausalLM(model_config)
+        #return LlamaForCausalLM(model_config)
+
+        from neuronx_distributed_inference.models.llama.modeling_llama import NeuronLlamaForCausalLM
+
+        return NeuronLlamaForCausalLM(model_config)
+
     elif "qwen3" in model_name:
-        from .qwen3 import Qwen3ForCausalLM
+        #from .qwen3 import Qwen3ForCausalLM
 
-        return Qwen3ForCausalLM(model_config)
+        #return Qwen3ForCausalLM(model_config)
+        from neuronx_distributed_inference.models.qwen3.modeling_qwen3 import NeuronQwen3ForCausalLM
+
+        return NeuronQwen3ForCausalLM(model_config)
     else:
         raise ValueError(f"Unsupported model: {model_path}")
+    
+def _get_neuron_model_cls(architecture: str):
+    try:
+        if "For" in architecture:
+            model, task = architecture.split("For", 1)
+            if task == "ConditionalGeneration":
+                task = "CausalLM"  # to match NxDI class names for Mllama and Pixtral
+            model, task = model.lower(), _camel_to_kebab(task)
+
+            if model == "qwen3moe":
+                model = "qwen3_moe"
+
+            if architecture == "LlavaForConditionalGeneration":
+                model = "pixtral"
+
+            return MODEL_TYPES[model][task]
+        else:
+            raise KeyError
+    except KeyError:
+        raise ValueError(
+            f"Model {architecture} is not supported on Neuron for now. Supported models: {list(MODEL_TYPES.keys())}"
+        )
 
 
 __all__ = ["BaseLLMModel", "load_hf_weight", "create_model", "ModelConfig", "RotaryConfig"]

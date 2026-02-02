@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Final, List
 
 import torch
+import torch_xla
 from minisgl.message import BaseBackendMsg, BaseTokenizerMsg, BatchTokenizerMsg, DetokenizeMsg
 from minisgl.utils import ZmqPubQueue, ZmqPullQueue, ZmqPushQueue, ZmqSubQueue, init_logger
 

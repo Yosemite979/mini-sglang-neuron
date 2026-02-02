@@ -15,6 +15,7 @@ if TYPE_CHECKING:
 
 def _run_scheduler(args: ServerArgs, ack_queue: mp.Queue[str]) -> None:
     import torch
+    import torch_xla
     from minisgl.scheduler import Scheduler
 
     with torch.inference_mode():

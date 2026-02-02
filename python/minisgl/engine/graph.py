@@ -4,6 +4,7 @@ import gc
 from typing import TYPE_CHECKING, Dict, List
 
 import torch
+import torch_xla.core.xla_model as xm
 from minisgl.core import Batch, Req, get_global_ctx
 from minisgl.distributed import get_tp_info
 from minisgl.utils import init_logger
@@ -42,7 +43,9 @@ def mem_GB(size: int) -> str:
 
 
 def get_free_memory(device: torch.device) -> int:
-    return torch.cuda.mem_get_info(device)[0]
+    #return torch.cuda.mem_get_info(device)[0]
+    mem_info_dict = xm.get_memory_info()
+    return mem_info_dict["bytes_limit"] - mem_info_dict["bytes_used"]
 
 
 class GraphRunner:

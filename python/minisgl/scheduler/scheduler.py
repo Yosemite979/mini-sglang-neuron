@@ -4,6 +4,9 @@ from typing import TYPE_CHECKING, List, NamedTuple, NoReturn, Set, Tuple, TypeAl
 
 import torch
 import torch.nn.functional as F
+import torch_xla
+import torch_xla.core.xla_model as xm
+
 from minisgl.core import Batch, Req
 from minisgl.env import ENV
 from minisgl.message import (
@@ -49,11 +52,7 @@ class Scheduler(SchedulerIOMixin):
         # Initialize the I/O mixin
         super().__init__(config, self.engine.tp_cpu_group)
 
-        # use another stream to overlap metadata processing with computation
         self.device = self.engine.device
-        self.stream = torch.cuda.Stream(device=self.device)
-        self.engine_stream_ctx = torch.cuda.stream(self.engine.stream)
-        torch.cuda.set_stream(self.stream)
 
         # initialize other managers
         self.table_manager = TableManager(config.max_running_req, self.engine.page_table)
@@ -218,8 +217,6 @@ class Scheduler(SchedulerIOMixin):
     def _forward(self, forward_input: ForwardInput) -> ForwardOutput:
         self._load_token_ids(forward_input)
         batch, sample_args = forward_input.batch, forward_input.sample_args
-        if ENV.OVERLAP_EXTRA_SYNC:  # NOTE: https://github.com/sgl-project/mini-sglang/issues/58
-            self.stream.synchronize()
         forward_output = self.engine.forward_batch(batch, sample_args)
         self._write_token_ids(forward_input, forward_output)
         self.decode_manager.filter_reqs(forward_input.batch.reqs)
@@ -229,31 +226,6 @@ class Scheduler(SchedulerIOMixin):
         """Called when the scheduler is idle to perform background tasks."""
         logger.info_rank0("Scheduler is idle, waiting for new reqs...")
         self.cache_manager.check_integrity()
-
-    def overlap_loop(self, last_data: ForwardData | None) -> ForwardData | None:
-        """
-        The main loop of overlapping scheduling and execution.
-
-        It will overlap the execution of current batch and processing of last batch's results,
-        which can effectively hide CPU latency and improve GPU utilization.
-        """
-        blocking = not (
-            last_data  # don't block if we have a batch to be processed
-            or self.prefill_manager.runnable
-            or self.decode_manager.runnable
-        )
-        for msg in self.receive_msg(blocking=blocking):
-            self._process_one_msg(msg)
-
-        forward_input = self._schedule_next_batch()
-        ongoing_data = None
-        if forward_input is not None:
-            with self.engine_stream_ctx:  # run the batch in the engine's stream
-                self.engine.stream.wait_stream(self.stream)
-                ongoing_data = (forward_input, self._forward(forward_input))
-
-        self._process_last_data(last_data, ongoing_data)
-        return ongoing_data
 
     def normal_loop(self) -> None:
         blocking = not (self.prefill_manager.runnable or self.decode_manager.runnable)
@@ -267,20 +239,14 @@ class Scheduler(SchedulerIOMixin):
 
         self._process_last_data(ongoing_data, None)
 
-    @torch.inference_mode()
+    @torch.no_grad()
     def run_forever(self) -> NoReturn:
-        if ENV.DISABLE_OVERLAP_SCHEDULING:
-            with self.engine_stream_ctx:
-                self.engine.stream.wait_stream(self.stream)
-                while True:
-                    self.normal_loop()
-        else:
-            assert torch.cuda.current_stream() == self.stream
-            data = None
-            while True:
-                data = self.overlap_loop(data)
+        while True:
+            self.normal_loop()
 
     def shutdown(self) -> None:
-        torch.cuda.synchronize(self.device)
+        #torch.cuda.synchronize(self.device)
+        torch_xla.sync()
+        xm.wait_device_ops()
         self.sync_all_ranks()
         self.engine.shutdown()
