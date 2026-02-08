@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import logging
 import multiprocessing as mp
+import time
 import sys
+import os
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
@@ -15,7 +17,6 @@ if TYPE_CHECKING:
 
 def _run_scheduler(args: ServerArgs, ack_queue: mp.Queue[str]) -> None:
     import torch
-    import torch_xla
     from minisgl.scheduler import Scheduler
 
     with torch.inference_mode():
@@ -51,6 +52,7 @@ def launch_server(run_shell: bool = False) -> None:
         from minisgl.tokenizer import tokenize_worker
 
         mp.set_start_method("spawn", force=True)
+        ctx = mp.get_context('spawn')
 
         world_size = server_args.tp_info.size
         # a multiprocessing queue to receive ack from subprocesses
@@ -62,12 +64,26 @@ def launch_server(run_shell: bool = False) -> None:
                 server_args,
                 tp_info=DistributedInfo(i, world_size),
             )
-            mp.Process(
+            ctx.Process(
                 target=_run_scheduler,
                 args=(new_args, ack_queue),
                 daemon=False,
                 name=f"minisgl-TP{i}-scheduler",
             ).start()
+            time.sleep(2)
+            break
+       
+        """
+        ctx = mp.get_context("spawn")
+        manager = ctx.Manager()
+        ack_queue: mp.Queue[str] = manager.Queue()
+        xmp.spawn(
+            _run_scheduler,
+            args=(server_args, ack_queue),
+            nprocs=None,
+            start_method="spawn",
+        )
+        """
 
         num_tokenizers = server_args.num_tokenizer
         # DeTokenizer, only 1

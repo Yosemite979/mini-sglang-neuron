@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import cached_property
-from typing import TYPE_CHECKING, List
+from typing import TYPE_CHECKING, Any, Dict, List
 
 import torch
 import torch_xla
@@ -29,6 +29,15 @@ class EngineConfig:
     use_pynccl: bool = True
     max_seq_len_override: int | None = None
     num_page_override: int | None = None  # if not None, will override the number of pages
+    use_neuron_model: bool = True
+    neuron_config_overrides: Dict[str, Any] | None = None
+    compiled_model_path: str | None = None
+    skip_compile: bool = False
+    compile_only: bool = False
+    compile_dry_run: bool = False
+    hlo_debug: bool = False
+    on_cpu: bool = False
+    enable_torch_dist: bool = True
 
     @cached_property
     def hf_config(self):

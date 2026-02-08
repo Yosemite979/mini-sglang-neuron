@@ -18,8 +18,8 @@ class BatchSamplingArgs:
 
 
 def make_device_tensor(data: List, dtype: torch.dtype, device: torch.device) -> torch.Tensor:
-    return torch.tensor(data, dtype=dtype, pin_memory=True).to(device, non_blocking=True)
-
+    #return torch.tensor(data, dtype=dtype, pin_memory=True).to(device, non_blocking=True)
+    return torch.tensor(data, dtype=dtype).to(device, non_blocking=True)
 
 def sample_impl(
     logits: torch.Tensor,

@@ -25,28 +25,5 @@ def create_model(model_path: str, model_config: ModelConfig) -> BaseLLMModel:
         return NeuronQwen3ForCausalLM(model_config)
     else:
         raise ValueError(f"Unsupported model: {model_path}")
-    
-def _get_neuron_model_cls(architecture: str):
-    try:
-        if "For" in architecture:
-            model, task = architecture.split("For", 1)
-            if task == "ConditionalGeneration":
-                task = "CausalLM"  # to match NxDI class names for Mllama and Pixtral
-            model, task = model.lower(), _camel_to_kebab(task)
-
-            if model == "qwen3moe":
-                model = "qwen3_moe"
-
-            if architecture == "LlavaForConditionalGeneration":
-                model = "pixtral"
-
-            return MODEL_TYPES[model][task]
-        else:
-            raise KeyError
-    except KeyError:
-        raise ValueError(
-            f"Model {architecture} is not supported on Neuron for now. Supported models: {list(MODEL_TYPES.keys())}"
-        )
-
 
 __all__ = ["BaseLLMModel", "load_hf_weight", "create_model", "ModelConfig", "RotaryConfig"]

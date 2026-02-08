@@ -4,8 +4,8 @@ from typing import TYPE_CHECKING, List, NamedTuple, NoReturn, Set, Tuple, TypeAl
 
 import torch
 import torch.nn.functional as F
-import torch_xla
-import torch_xla.core.xla_model as xm
+#import torch_xla
+#import torch_xla.core.xla_model as xm
 
 from minisgl.core import Batch, Req
 from minisgl.env import ENV
@@ -47,6 +47,7 @@ ForwardData: TypeAlias = "Tuple[ForwardInput, ForwardOutput]"
 class Scheduler(SchedulerIOMixin):
     def __init__(self, config: SchedulerConfig):
         from minisgl.engine import Engine
+        import torch_xla
 
         self.engine = Engine(config)
         # Initialize the I/O mixin
@@ -141,8 +142,10 @@ class Scheduler(SchedulerIOMixin):
         needed_size = sum(r.extend_len for r in batch.reqs)
         batch.out_loc = self.cache_manager.allocate(needed_size)
         # NOTE: Pad the batch if needed
-        if padding_size := self.engine.graph_runner.pad_batch(batch):
-            batch.out_loc = F.pad(batch.out_loc, (0, padding_size), value=self.engine.dummy_page)
+        
+        # neuronx-distributed-inference will auto pad to the sequence length.
+        #if padding_size := self.engine.graph_runner.pad_batch(batch):
+        #    batch.out_loc = F.pad(batch.out_loc, (0, padding_size), value=self.engine.dummy_page)
         # NOTE: prepare 2d indices for token ids loading and writing
         load_indices = self._make_2d_indices(
             [(r.table_idx, r.cached_len, r.device_len) for r in batch.padded_reqs]
@@ -231,6 +234,21 @@ class Scheduler(SchedulerIOMixin):
         blocking = not (self.prefill_manager.runnable or self.decode_manager.runnable)
         for msg in self.receive_msg(blocking=blocking):
             self._process_one_msg(msg)
+
+        # Fast test for model one-token decoding.
+        input_ids = self.prefill_manager.pending_list[-1].input_ids
+        attention_mask = torch.ones_like(input_ids)
+        position_ids = attention_mask.long().cumsum(-1) - 1
+        output = self.engine.model.model.forward(
+            input_ids=input_ids.unsqueeze(0),
+            attention_mask=attention_mask.unsqueeze(0),
+            position_ids=position_ids.unsqueeze(0),
+        )
+        logger.warning_rank0(type(output))
+        logger.warning_rank0(output) # only single token
+
+        exit()
+
 
         forward_input = self._schedule_next_batch()
         ongoing_data = None
