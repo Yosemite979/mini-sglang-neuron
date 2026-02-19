@@ -53,7 +53,7 @@ class Scheduler(SchedulerIOMixin):
         # Initialize the I/O mixin
         super().__init__(config, self.engine.tp_cpu_group)
 
-        self.device = self.engine.device
+        self.device = torch.device("cpu")
 
         # initialize other managers
         self.table_manager = TableManager(config.max_running_req, self.engine.page_table)
@@ -144,8 +144,8 @@ class Scheduler(SchedulerIOMixin):
         # NOTE: Pad the batch if needed
         
         # neuronx-distributed-inference will auto pad to the sequence length.
-        #if padding_size := self.engine.graph_runner.pad_batch(batch):
-        #    batch.out_loc = F.pad(batch.out_loc, (0, padding_size), value=self.engine.dummy_page)
+        if padding_size := self.engine.pad_batch(batch):
+            batch.out_loc = F.pad(batch.out_loc, (0, padding_size), value=self.engine.dummy_page)
         # NOTE: prepare 2d indices for token ids loading and writing
         load_indices = self._make_2d_indices(
             [(r.table_idx, r.cached_len, r.device_len) for r in batch.padded_reqs]
@@ -163,7 +163,7 @@ class Scheduler(SchedulerIOMixin):
         assert all(r.device_len < self.engine.max_seq_len for r in batch.reqs)
         # NOTE: write out_loc to page_table before `prepare_metadata`
         self.page_table.view(-1)[load_indices] = batch.out_loc
-        self.engine.attn_backend.prepare_metadata(batch)
+        #self.engine.attn_backend.prepare_metadata(batch)
         return ForwardInput(
             batch=batch,
             sample_args=self.engine.sampler.prepare(batch),
@@ -198,7 +198,7 @@ class Scheduler(SchedulerIOMixin):
         """
         STRIDE = self.token_pool.stride(0)
         needed_size = sum(end - begin for _, begin, end in ranges)
-        indices_host = torch.empty(needed_size, dtype=torch.int32, pin_memory=True)
+        indices_host = torch.empty(needed_size, dtype=torch.int32) #, pin_memory=True)
         offset = 0
         for entry, begin, end in ranges:
             length = end - begin
@@ -235,20 +235,25 @@ class Scheduler(SchedulerIOMixin):
         for msg in self.receive_msg(blocking=blocking):
             self._process_one_msg(msg)
 
+        """
         # Fast test for model one-token decoding.
-        input_ids = self.prefill_manager.pending_list[-1].input_ids
-        attention_mask = torch.ones_like(input_ids)
-        position_ids = attention_mask.long().cumsum(-1) - 1
-        output = self.engine.model.model.forward(
+        #input_ids = self.prefill_manager.pending_list[-1].input_ids
+        #attention_mask = torch.ones_like(input_ids)
+        #position_ids = attention_mask.long().cumsum(-1) - 1
+        m = self.engine.model.model
+        print(type(m))
+        print(hasattr(m, "lm_head"), hasattr(m, "get_output_embeddings"))
+        output = self.engine.model.model(
             input_ids=input_ids.unsqueeze(0),
             attention_mask=attention_mask.unsqueeze(0),
             position_ids=position_ids.unsqueeze(0),
+            block_table=None,
         )
         logger.warning_rank0(type(output))
         logger.warning_rank0(output) # only single token
-
+        logger.warning_rank0(output.tokens)
         exit()
-
+        """
 
         forward_input = self._schedule_next_batch()
         ongoing_data = None

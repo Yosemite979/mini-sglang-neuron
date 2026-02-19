@@ -35,7 +35,7 @@ class BaseCaptureData:
 
 def make_positions(device: torch.device, reqs: List[Req]) -> torch.Tensor:
     needed_size = sum(req.extend_len for req in reqs)
-    indices_host = torch.empty(needed_size, dtype=torch.int32, pin_memory=True)
+    indices_host = torch.empty(needed_size, dtype=torch.int32) #, pin_memory=True)
     offset = 0
     for req in reqs:
         length = req.extend_len

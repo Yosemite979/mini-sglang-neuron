@@ -6,7 +6,9 @@ from typing import List
 import torch
 
 from minisgl.core import Batch
+from minisgl.utils import init_logger
 
+logger = init_logger(__name__)
 
 @dataclass(frozen=True)
 class ModelInputForNeuron:
@@ -82,10 +84,10 @@ class NeuronInputBuilder:
             block_tables=block_tables,
             full_context_lens=torch.tensor(
                 full_context_lens, dtype=torch.int32, device=batch.input_ids.device
-            ),
+            ).reshape(-1, 1),
             computed_context_lens=torch.tensor(
                 computed_context_lens, dtype=torch.int32, device=batch.input_ids.device
-            ),
+            ).reshape(-1, 1),
         )
 
     def _build_block_tables(self, reqs: List, device: torch.device) -> torch.Tensor:

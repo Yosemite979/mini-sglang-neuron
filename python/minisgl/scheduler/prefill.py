@@ -55,9 +55,10 @@ class PrefillAdder:
         if cached_len > 0:  # NOTE: set the cached part
             device_ids = self.table_manager.token_pool[table_idx][:cached_len]
             page_entry = self.table_manager.page_table[table_idx][:cached_len]
-            device_ids.copy_(req.input_ids[:cached_len].pin_memory(), non_blocking=True)
+            #device_ids.copy_(req.input_ids[:cached_len].pin_memory(), non_blocking=True)
+            device_ids.copy_(req.input_ids[:cached_len], non_blocking=True)
             page_entry.copy_(match_indices)
-
+        logger.error(f"xinux - {cached_len=}")
         return handle, table_idx
 
     def _add_one_req(
@@ -92,13 +93,13 @@ class PrefillAdder:
         if self.token_budget <= 0:
             return None
 
-        #if chunked_req := pending_req.chunked_req:
-        #    return self._add_one_req(
-        #        pending_req=pending_req,
-        #        cache_handle=chunked_req.cache_handle,
-        #        table_idx=chunked_req.table_idx,
-        #        cached_len=chunked_req.cached_len,
-        #    )
+        if chunked_req := pending_req.chunked_req:
+            return self._add_one_req(
+                pending_req=pending_req,
+                cache_handle=chunked_req.cache_handle,
+                table_idx=chunked_req.table_idx,
+                cached_len=chunked_req.cached_len,
+            )
 
         if resource := self._try_allocate_one(pending_req):
             cache_handle, table_idx = resource

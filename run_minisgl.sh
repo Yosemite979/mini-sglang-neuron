@@ -1,3 +1,17 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if ! command -v ninja >/dev/null 2>&1; then
+  echo "ERROR: 'ninja' is required but was not found in PATH." >&2
+  echo "Install it with: apt-get install ninja-build  OR  conda install -c conda-forge ninja" >&2
+  exit 1
+fi
+
+if ! command -v g++ >/dev/null 2>&1 && ! command -v clang++ >/dev/null 2>&1; then
+  echo "ERROR: A C++ compiler is required (g++ or clang++) but none was found in PATH." >&2
+  exit 1
+fi
+
 unset NEURON_VISIBLE_DEVICES
 
 export TP_SIZE=2
@@ -11,7 +25,8 @@ python -m minisgl \
   --dtype bfloat16 \
   --tp-size "$TP_SIZE" \
   --max-running-requests 64 \
-  --max-seq-len-override 127 \
-  --num-pages 8192 \
+  --max-seq-len-override 4096 \
+  --num-pages 1024 \
   --port 1919 \
+  --cache-type radix \
   --shell 2>&1 | tee /root/data/sgl.log

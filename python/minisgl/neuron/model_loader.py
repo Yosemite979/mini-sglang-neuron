@@ -31,6 +31,7 @@ class NeuronLoadConfig:
     max_model_len: int
     block_size: int
     num_blocks: int
+    max_extend_tokens: int
     override_neuron_config: Dict[str, Any] | None = None
     compile_kwargs: Dict[str, Any] | None = None
 
@@ -102,7 +103,6 @@ class NeuronModelBase(nn.Module):
         if self.is_reorder_needed:
             sorted_ids, sorted_indices = torch.sort(input_block_ids)
             reordered_inputs = self._sort_inputs(inputs, sorted_indices)
-
             def restore(output: torch.Tensor) -> torch.Tensor:
                 if sorted_ids.shape[0] != 1:
                     return torch.index_select(output, 0, torch.argsort(sorted_indices))
@@ -128,6 +128,7 @@ class NeuronModelBase(nn.Module):
         return sorted_inputs
 
     def _load_weights_common(self, model_name_or_path: str, neuronx_model_cls, **kwargs):
+        logger.error(f"xinux - {kwargs["neuron_config"]=}") 
         neuron_config = neuronx_model_cls.get_neuron_config_cls()(**kwargs["neuron_config"])
         config = neuronx_model_cls.get_config_cls()(
             neuron_config, load_config=load_pretrained_config(model_name_or_path)
@@ -232,6 +233,10 @@ class NeuronCausalLM(NeuronModelBase):
         block_tables: torch.Tensor,
         **kwargs,
     ) -> torch.Tensor:
+        #logger.error(f"xinux - {block_tables.shape=}, {input_ids.shape=}, {position_ids.shape=}")
+        #logger.error(f"xinux - {kwargs['full_context_lens'].shape=}, {kwargs['computed_context_lens'].shape=}")
+        #logger.error(f"xinux - {kwargs['full_context_lens']=}, {kwargs['computed_context_lens']=}")
+
         with self._reordered(
             input_block_ids,
             input_ids=input_ids,
@@ -284,18 +289,41 @@ class NeuronCausalLM(NeuronModelBase):
 
 
 def _default_neuron_config(load_cfg: NeuronLoadConfig) -> Dict[str, Any]:
+    """
     neuron_config: Dict[str, Any] = {
         "tp_degree": load_cfg.tp_degree,
         "ctx_batch_size": 1,
         "batch_size": load_cfg.max_batch_size,
         "max_context_length": load_cfg.max_model_len,
-        "max_new_tokens": 1,
-        "block_size": load_cfg.block_size,
+        "max_new_tokens": load_cfg.max_extend_tokens,
+        "pa_block_size": 16, #load_cfg.block_size,
         "pa_num_blocks": load_cfg.num_blocks,
         "is_block_kv_layout": False,
         "is_prefix_caching": False,
-        "chunked_prefill_config": None,
+        #"chunked_prefill_config": None,
+        "attn_kernel_enabled": False,
+        "output_logits": True,
         "on_device_sampling_config": OnDeviceSamplingConfig(dynamic=True, deterministic=False),
+        "seq_len": load_cfg.max_model_len, # xinux - Hardcoded for now
+    }
+
+    """
+    neuron_config: Dict[str, Any] = {
+        "tp_degree": load_cfg.tp_degree,
+        #"ctx_batch_size": 1,
+        "batch_size": load_cfg.max_batch_size,
+        "max_context_length": load_cfg.max_model_len,
+        "max_new_tokens": load_cfg.max_extend_tokens,
+        "pa_block_size": 1, #load_cfg.block_size,
+        "pa_num_blocks": load_cfg.num_blocks,
+        "is_block_kv_layout": True,
+        "is_prefix_caching": True,
+        #"chunked_prefill_config": None,
+        #"is_continuous_batching": (load_cfg.max_batch_size>1),
+        "attn_kernel_enabled": False,
+        "output_logits": True,
+        "on_device_sampling_config": OnDeviceSamplingConfig(dynamic=True, deterministic=False),
+        "seq_len": load_cfg.max_model_len, # xinux - Hardcoded for now
     }
     if load_cfg.override_neuron_config:
         neuron_config.update(load_cfg.override_neuron_config)
@@ -306,6 +334,7 @@ def get_neuron_model(load_cfg: NeuronLoadConfig, *, init_only: bool = False) -> 
     architecture = _get_architecture(load_cfg.hf_config)
     model = NeuronCausalLM(load_cfg.hf_config)
     neuron_config = _default_neuron_config(load_cfg)
+    logger.error(f"xinux - {neuron_config}")
     if init_only:
         model.init_for_compile(
             load_cfg.model_path,

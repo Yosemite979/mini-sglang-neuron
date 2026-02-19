@@ -54,7 +54,7 @@ class Engine:
         self.dtype = config.dtype
         self.use_neuron_model = config.use_neuron_model
 
-        self.device = torch.device("xla:0") # Use the first local device for management purpose
+        self.device = torch.device("cpu") # Use cpu for management purpose
         
         self.tp_cpu_group = self._init_communication(config)
         init_free_memory = self._sync_get_memory()[1]
@@ -73,12 +73,14 @@ class Engine:
         if config.compile_dry_run:
             compile_kwargs["dry_run"] = True
 
+        
         load_cfg = NeuronLoadConfig(
             model_path=config.model_path,
             hf_config=config.hf_config,
             tp_degree=config.tp_info.size,
             max_batch_size=config.max_running_req,
             max_model_len=config.max_seq_len,
+            max_extend_tokens=config.max_extend_tokens,
             block_size=config.page_size,
             num_blocks=config.num_page_override or config.max_seq_len,
             override_neuron_config=config.neuron_config_overrides,
@@ -150,7 +152,8 @@ class Engine:
         self.attn_backend = None
         self.ctx = Context(page_size=1, attn_backend=self.attn_backend)
         set_global_ctx(self.ctx)
-        self.sampler = Sampler(self.device, self.model_config.vocab_size)
+        #self.sampler = Sampler(self.device, self.model_config.vocab_size)
+        self.sampler = Sampler(torch.device("cpu"), self.model_config.vocab_size)
         self.neuron_input_builder = (
             NeuronInputBuilder(self.page_table, self.max_seq_len) if self.use_neuron_model else None
         )
@@ -185,7 +188,16 @@ class Engine:
         #        vocab_size=self.model_config.vocab_size,
         #        dummy_req=self.dummy_req,
         #    )
-
+    def pad_batch(self, batch: Batch) -> int:
+        max_batch_size = self.model.neuron_config.batch_size
+        padded_size = (  # choose the first available batch size
+            max_batch_size 
+            if max_batch_size > batch.size 
+            else batch.size
+        )
+        batch.padded_reqs = batch.reqs + [self.dummy_req] * (padded_size - batch.size)
+        return batch.padded_size - batch.size
+    
     def _init_communication(self, config: EngineConfig) -> torch.distributed.ProcessGroup:
         #if config.tp_info.size == 1 or config.use_pynccl:
         #    torch.distributed.init_process_group(
@@ -237,9 +249,14 @@ class Engine:
         )
         num_pages = config.num_page_override
         if num_pages is None:
-            model_memory = old_free_memory - new_free_memory
-            available_memory = int(config.memory_ratio * old_free_memory) - model_memory
-            num_pages = available_memory // cache_per_page
+            # In NxDI, the page number should be pre-allocated before the model weight is loaded.
+            # Thus, we are not able to pre-determine the max available memory after the model is loaded.
+            # For now, we just assume a hard-coded value as a workaround.
+            num_pages = config.max_seq_len * config.max_running_req
+
+            #model_memory = old_free_memory - new_free_memory
+            #available_memory = int(config.memory_ratio * old_free_memory) - model_memory
+            #num_pages = available_memory // cache_per_page
 
         assert num_pages > 1, "Not enough memory for KV cache, try reducing --num-tokens"
         real_kv_size = num_pages * cache_per_page
@@ -286,6 +303,7 @@ class Engine:
                 if hasattr(self.model, "execute_model"):
                     logits = self.model.execute_model(model_input)
                 else:
+                    #logger.error(f"xinux - forward_batch - 3.2 -> here")
                     logits = self.model.forward(
                         input_ids=model_input.input_tokens,
                         position_ids=model_input.position_ids,
