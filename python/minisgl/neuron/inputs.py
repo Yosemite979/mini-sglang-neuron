@@ -120,18 +120,18 @@ class NeuronInputBuilder:
                 tokens = batch.input_ids[offset : offset + ext_len]
                 input_tokens[i, :ext_len] = tokens
                 position_ids[i, :ext_len] = torch.arange(
-                    cached_len - 1, cached_len - 1 + ext_len, dtype=torch.int32, device=device
+                    cached_len, cached_len + ext_len, dtype=torch.int32, device=device
                 )
                 block_tables[i, :dev_len] = self._build_block_tables(req)
-                slot_mapping[i, :ext_len] = block_tables[i, cached_len - 1 : cached_len - 1 + ext_len]
+                slot_mapping[i, :ext_len] = block_tables[i, cached_len : cached_len + ext_len]
                 offset += ext_len
             input_block_ids[i] = req.table_idx
 
         full_context_lens = torch.tensor(
-            [req.cached_len for req in reqs], dtype=torch.int32, device=device
+            [req.device_len for req in reqs], dtype=torch.int32, device=device
         ).reshape(-1, 1)
         computed_context_lens = torch.tensor(
-            [req.cached_len - 1 for req in reqs], dtype=torch.int32, device=device
+            [req.cached_len for req in reqs], dtype=torch.int32, device=device
         ).reshape(-1, 1)
 
         return ModelInputForNeuron(
