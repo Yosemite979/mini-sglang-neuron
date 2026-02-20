@@ -304,7 +304,7 @@ def _default_neuron_config(load_cfg: NeuronLoadConfig) -> Dict[str, Any]:
         "attn_kernel_enabled": False,
         "output_logits": True,
         "on_device_sampling_config": OnDeviceSamplingConfig(dynamic=True, deterministic=False),
-        "seq_len": load_cfg.max_model_len, # xinux - Hardcoded for now
+        "seq_len": load_cfg.max_model_len, 
     }
 
     """
@@ -323,7 +323,7 @@ def _default_neuron_config(load_cfg: NeuronLoadConfig) -> Dict[str, Any]:
         "attn_kernel_enabled": False,
         "output_logits": True,
         "on_device_sampling_config": OnDeviceSamplingConfig(dynamic=True, deterministic=False),
-        "seq_len": load_cfg.max_model_len, # xinux - Hardcoded for now
+        "seq_len": load_cfg.max_model_len, 
     }
     if load_cfg.override_neuron_config:
         neuron_config.update(load_cfg.override_neuron_config)

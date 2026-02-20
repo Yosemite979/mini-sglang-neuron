@@ -58,7 +58,7 @@ class PrefillAdder:
             #device_ids.copy_(req.input_ids[:cached_len].pin_memory(), non_blocking=True)
             device_ids.copy_(req.input_ids[:cached_len], non_blocking=True)
             page_entry.copy_(match_indices)
-        logger.error(f"xinux - {cached_len=}")
+        #logger.error(f"xinux - {cached_len=}")
         return handle, table_idx
 
     def _add_one_req(

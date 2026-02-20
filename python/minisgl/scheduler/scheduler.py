@@ -38,6 +38,7 @@ class ForwardInput(NamedTuple):
     batch: Batch
     sample_args: BatchSamplingArgs
     load_indices: torch.Tensor
+    full_load_indices: torch.Tensor
     write_indices: torch.Tensor
 
 
@@ -150,6 +151,9 @@ class Scheduler(SchedulerIOMixin):
         load_indices = self._make_2d_indices(
             [(r.table_idx, r.cached_len, r.device_len) for r in batch.padded_reqs]
         )
+        full_load_indices = self._make_2d_indices(
+            [(r.table_idx, 0, r.device_len) for r in batch.padded_reqs]
+        )
         write_indices = self._make_2d_indices(
             [
                 (
@@ -168,6 +172,7 @@ class Scheduler(SchedulerIOMixin):
             batch=batch,
             sample_args=self.engine.sampler.prepare(batch),
             load_indices=load_indices,
+            full_load_indices=full_load_indices,
             write_indices=write_indices,
         )
 
@@ -212,7 +217,11 @@ class Scheduler(SchedulerIOMixin):
         return indices_host.to(self.device, non_blocking=True)
 
     def _load_token_ids(self, input: ForwardInput) -> None:
-        input.batch.input_ids = self.token_pool.view(-1)[input.load_indices]
+        if input.batch.is_prefill:
+            input.batch.input_ids = self.token_pool.view(-1)[input.full_load_indices]
+        else:
+            input.batch.input_ids = self.token_pool.view(-1)[input.load_indices]
+
 
     def _write_token_ids(self, input: ForwardInput, output: ForwardOutput) -> None:
         self.token_pool.view(-1)[input.write_indices] = output.next_tokens_gpu

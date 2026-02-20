@@ -300,6 +300,9 @@ class Engine:
             if self.use_neuron_model:
                 assert self.neuron_input_builder is not None
                 model_input = self.neuron_input_builder.build(batch)
+                #logger.error(f"xinux - {model_input=}")
+                #logger.error(f"xinux - {model_input.block_tables[0][:100]=}")
+                #logger.error(f"xinux - {model_input.slot_mapping[0][:100]=}")
                 if hasattr(self.model, "execute_model"):
                     logits = self.model.execute_model(model_input)
                 else:
