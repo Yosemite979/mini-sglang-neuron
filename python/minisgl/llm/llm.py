@@ -26,10 +26,10 @@ class RequestStatus:
 
 
 class LLM(Scheduler):
-    def __init__(self, model_path: str, dtype: torch.dtype = torch.bfloat16, **kwargs):
+    def __init__(self, model_path: str, dtype: torch.dtype = torch.bfloat16, tp_size: int = 2, **kwargs):
         config = SchedulerConfig(
             model_path=model_path,
-            tp_info=DistributedInfo(0, 1),
+            tp_info=DistributedInfo(0, tp_size),
             dtype=dtype,
             offline_mode=True,
             **kwargs,

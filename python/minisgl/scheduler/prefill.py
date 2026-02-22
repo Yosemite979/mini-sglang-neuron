@@ -55,10 +55,8 @@ class PrefillAdder:
         if cached_len > 0:  # NOTE: set the cached part
             device_ids = self.table_manager.token_pool[table_idx][:cached_len]
             page_entry = self.table_manager.page_table[table_idx][:cached_len]
-            #device_ids.copy_(req.input_ids[:cached_len].pin_memory(), non_blocking=True)
             device_ids.copy_(req.input_ids[:cached_len], non_blocking=True)
             page_entry.copy_(match_indices)
-        #logger.error(f"xinux - {cached_len=}")
         return handle, table_idx
 
     def _add_one_req(
@@ -72,6 +70,7 @@ class PrefillAdder:
         chunk_size = min(self.token_budget, remain_len)
         is_chunked = chunk_size < remain_len
         CLS = ChunkedReq if is_chunked else Req
+        logger.error(f"xinux - {CLS.__name__} for {pending_req.uid}, chunk_size={chunk_size}, remain_len={remain_len}")
         self.token_budget -= chunk_size
         self.reserved_size += remain_len + pending_req.output_len
         # NOTE: update the tokens ids only; new pages will be allocated in the scheduler

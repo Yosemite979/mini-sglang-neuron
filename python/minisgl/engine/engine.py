@@ -47,9 +47,6 @@ class Engine:
         self.model_config = config.model_config
         set_tp_info(rank=config.tp_info.rank, size=config.tp_info.size)
 
-        #torch.cuda.set_device(self.device)
-        #self.stream = torch.cuda.Stream()
-        #torch.cuda.set_stream(self.stream)
         self.stream = None # XLA does not support stream
         self.dtype = config.dtype
         self.use_neuron_model = config.use_neuron_model
@@ -64,6 +61,33 @@ class Engine:
         """
         set_rope_device(self.device)
         """
+        self.num_pages = self.dummy_page = self._determine_num_pages(init_free_memory, config)
+        #if self.use_neuron_model:
+        #    self.kv_cache = self.model.get_kv_caches()
+        #else:
+        #    self.kv_cache = create_kvcache(
+        #        model_config=config.model_config,
+        #        num_pages=self.num_pages + 1,  # +1 for dummy page
+        #        device=self.device,
+        #        dtype=self.dtype,
+        #    )
+        # NOTE: make page table 128 aligned (32 * sizeof(int32) == 128 bytes)
+        self.max_seq_len = _align_up_32(min(config.max_seq_len, self.num_pages))
+        # The last page (with index `self.num_pages`) is reserved for dummy requests, which should never be allocated to real requests. This simplifies the handling of padded dummy requests and chunked requests that require padding.
+        self.page_table = create_page_table(  # + 1 for dummy request
+            (config.max_running_req + 1, self.max_seq_len),
+            device=self.device,
+        )
+        #if self.use_neuron_model:
+        #    self.attn_backend = NeuronAttnBackend(self.page_table)
+        #else:
+        #    self.attn_backend = create_attention_backend(
+        #        config.attention_backend,
+        #        config.model_config,
+        #        self.kv_cache,
+        #        self.page_table,
+        #    )
+
         #if self.use_neuron_model:
         from minisgl.neuron import NeuronInputBuilder, NeuronLoadConfig, get_neuron_model
 
@@ -79,10 +103,10 @@ class Engine:
             hf_config=config.hf_config,
             tp_degree=config.tp_info.size,
             max_batch_size=config.max_running_req,
-            max_model_len=config.max_seq_len,
+            max_model_len=self.max_seq_len,
             max_extend_tokens=config.max_extend_tokens,
             block_size=config.page_size,
-            num_blocks=config.num_page_override or config.max_seq_len,
+            num_blocks=self.num_pages,
             override_neuron_config=config.neuron_config_overrides,
             compile_kwargs=compile_kwargs or None,
         )
@@ -120,40 +144,11 @@ class Engine:
                     logger.warning("Model does not implement to_cpu(); keeping current device placement.")
             model_loading_time = time.monotonic() - loading_start_time
             logger.info_rank0(f"Total model loading time: {model_loading_time} seconds")
-        #else:
-        #    with torch.device("meta"), torch_dtype(config.dtype):
-        #        self.model = create_model(config.model_path, config.model_config)
-        #    self.model.load_state_dict(self._load_weight_state_dict(config))
-        self.num_pages = self.dummy_page = self._determine_num_pages(init_free_memory, config)
-        #if self.use_neuron_model:
-        #    self.kv_cache = self.model.get_kv_caches()
-        #else:
-        #    self.kv_cache = create_kvcache(
-        #        model_config=config.model_config,
-        #        num_pages=self.num_pages + 1,  # +1 for dummy page
-        #        device=self.device,
-        #        dtype=self.dtype,
-        #    )
-        # NOTE: make page table 128 aligned (32 * sizeof(int32) == 128 bytes)
-        self.max_seq_len = _align_up_32(min(config.max_seq_len, self.num_pages))
-        self.page_table = create_page_table(  # + 1 for dummy request
-            (config.max_running_req + 1, self.max_seq_len),
-            device=self.device,
-        )
-        #if self.use_neuron_model:
-        #    self.attn_backend = NeuronAttnBackend(self.page_table)
-        #else:
-        #    self.attn_backend = create_attention_backend(
-        #        config.attention_backend,
-        #        config.model_config,
-        #        self.kv_cache,
-        #        self.page_table,
-        #    )
+
         self.attn_backend = None
         self.ctx = Context(page_size=1, attn_backend=self.attn_backend)
         set_global_ctx(self.ctx)
-        #self.sampler = Sampler(self.device, self.model_config.vocab_size)
-        self.sampler = Sampler(torch.device("cpu"), self.model_config.vocab_size)
+        self.sampler = Sampler(self.device, self.model_config.vocab_size)
         self.neuron_input_builder = (
             NeuronInputBuilder(self.page_table, self.max_seq_len) if self.use_neuron_model else None
         )
@@ -196,24 +191,10 @@ class Engine:
             else batch.size
         )
         batch.padded_reqs = batch.reqs + [self.dummy_req] * (padded_size - batch.size)
+        logger.error(f"xinux - pad_batch: batch.size={batch.size}, extra_padded_size={padded_size-batch.size}")
         return batch.padded_size - batch.size
     
     def _init_communication(self, config: EngineConfig) -> torch.distributed.ProcessGroup:
-        #if config.tp_info.size == 1 or config.use_pynccl:
-        #    torch.distributed.init_process_group(
-        #        backend="gloo",
-        #        rank=config.tp_info.rank,
-        #        world_size=config.tp_info.size,
-        #        timeout=timedelta(seconds=config.distributed_timeout),
-        #        init_method=config.distributed_addr,
-        #    )
-        #    tp_cpu_group = torch.distributed.group.WORLD
-        #    assert tp_cpu_group is not None
-        #    max_bytes = (
-        #        config.max_forward_len * config.model_config.hidden_size * self.dtype.itemsize
-        #    )
-        #    enable_pynccl_distributed(config.tp_info, tp_cpu_group, max_bytes)
-  
         torch.distributed.init_process_group(
             backend="gloo",
             rank=0,
@@ -265,9 +246,6 @@ class Engine:
 
     def _sync_get_memory(self) -> Tuple[int, int]:
         """Get the min and max free memory across TP ranks."""
-        #torch.cuda.synchronize(self.device)
-        #torch.cuda.empty_cache()
-        #torch.cuda.reset_peak_memory_stats(self.device)
         torch_xla.sync()
         xm.wait_device_ops()
         gc.collect()
@@ -277,13 +255,6 @@ class Engine:
         free_memory_list = [get_free_memory(device) for device in device_list]
         max_free_memory, min_free_memory = max(free_memory_list), min(free_memory_list)
 
-        #free_memory = get_free_memory(self.device)
-        #free_mem_tensor = torch.tensor([free_memory, -free_memory], device="cpu", dtype=torch.int64)
-        #torch.distributed.all_reduce(
-        #    free_mem_tensor, op=torch.distributed.ReduceOp.MIN, group=self.tp_cpu_group
-        #)
-        #min_free_memory = int(free_mem_tensor[0].item())
-        #max_free_memory = -int(free_mem_tensor[1].item())
         if max_free_memory - min_free_memory > 2 * 1024 * 1024 * 1024:
             logger.error(
                 f"Memory across TP ranks are imbalanced:"
@@ -294,33 +265,18 @@ class Engine:
         return min_free_memory, max_free_memory
 
     def forward_batch(self, batch: Batch, args: BatchSamplingArgs) -> ForwardOutput:
-        if not self.use_neuron_model and self.stream is not None:
-            assert torch.cuda.current_stream() == self.stream
         with self.ctx.forward_batch(batch):
-            if self.use_neuron_model:
-                assert self.neuron_input_builder is not None
-                model_input = self.neuron_input_builder.build(batch)
-                #logger.error(f"xinux - {model_input=}")
-                #logger.error(f"xinux - {model_input.block_tables[0][:100]=}")
-                #logger.error(f"xinux - {model_input.slot_mapping[0][:100]=}")
-                if hasattr(self.model, "execute_model"):
-                    logits = self.model.execute_model(model_input)
-                else:
-                    #logger.error(f"xinux - forward_batch - 3.2 -> here")
-                    logits = self.model.forward(
-                        input_ids=model_input.input_tokens,
-                        position_ids=model_input.position_ids,
-                        input_block_ids=model_input.input_block_ids,
-                        slot_mapping=model_input.slot_mapping,
-                        block_tables=model_input.block_tables,
-                        full_context_lens=model_input.full_context_lens,
-                        computed_context_lens=model_input.computed_context_lens,
-                    )
-            else:
-                #if self.graph_runner.can_use_cuda_graph(batch):
-                #    logits = self.graph_runner.replay(batch)
-                #else:
-                logits = self.model.forward()
+            assert self.neuron_input_builder is not None
+            model_input = self.neuron_input_builder.build(batch)
+            logits = self.model.forward(
+                input_ids=model_input.input_tokens,
+                position_ids=model_input.position_ids,
+                input_block_ids=model_input.input_block_ids,
+                slot_mapping=model_input.slot_mapping,
+                block_tables=model_input.block_tables,
+                full_context_lens=model_input.full_context_lens,
+                computed_context_lens=model_input.computed_context_lens,
+            )
 
         for req in batch.reqs:
             req.complete_one()
@@ -332,7 +288,7 @@ class Engine:
             next_tokens_gpu = self.sampler.sample(logits[: batch.size], args).to(torch.int32)
             next_tokens_cpu = next_tokens_gpu.to("cpu", non_blocking=True)
         if self.use_neuron_model:
-            xm.wait_device_ops()
+            xm.mark_step()
             copy_done_event = _NoOpEvent()
         else:
             copy_done_event = torch.cuda.Event()

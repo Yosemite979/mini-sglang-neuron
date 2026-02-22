@@ -44,12 +44,12 @@ class NeuronInputBuilder:
         max_device_len = max(device_lens) if device_lens else 0
 
         input_tokens = torch.full(
-            (batch_size, max_device_len),
+            (batch_size, self.max_seq_len),
             self.pad_token_id,
             dtype=torch.int32,
             device=device,
         )
-        position_ids = torch.zeros((batch_size, max_device_len), dtype=torch.int32, device=device)
+        position_ids = torch.zeros((batch_size, self.max_seq_len), dtype=torch.int32, device=device)
         input_block_ids = torch.empty((batch_size,), dtype=torch.int32, device=device)
         slot_mapping = torch.full(
             (batch_size, self.max_seq_len), _SLOT_MAPPING_PAD, dtype=torch.int32, device=device

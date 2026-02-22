@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, List, NamedTuple, NoReturn, Set, Tuple, TypeAl
 import torch
 import torch.nn.functional as F
 #import torch_xla
-#import torch_xla.core.xla_model as xm
+import torch_xla.core.xla_model as xm
 
 from minisgl.core import Batch, Req
 from minisgl.env import ENV
@@ -79,7 +79,8 @@ class Scheduler(SchedulerIOMixin):
         if last_data is None:
             return
         batch, (_, next_tokens_cpu, copy_done) = last_data[0].batch, last_data[1]
-        copy_done.synchronize()
+        #copy_done.synchronize()
+        xm.wait_device_ops()
         reply: List[DetokenizeMsg] = []
 
         for i, req in enumerate(batch.reqs):
@@ -140,12 +141,14 @@ class Scheduler(SchedulerIOMixin):
             raise NotImplementedError
 
     def _prepare_batch(self, batch: Batch) -> ForwardInput:
+        padding_size = self.engine.pad_batch(batch)
+        # Allocate pages for real requests only. Padded dummy requests must map to dummy_page.
         needed_size = sum(r.extend_len for r in batch.reqs)
         batch.out_loc = self.cache_manager.allocate(needed_size)
         # NOTE: Pad the batch if needed
         
         # neuronx-distributed-inference will auto pad to the sequence length.
-        if padding_size := self.engine.pad_batch(batch):
+        if padding_size:
             batch.out_loc = F.pad(batch.out_loc, (0, padding_size), value=self.engine.dummy_page)
         # NOTE: prepare 2d indices for token ids loading and writing
         load_indices = self._make_2d_indices(
@@ -165,9 +168,11 @@ class Scheduler(SchedulerIOMixin):
             ]
         )
         assert all(r.device_len < self.engine.max_seq_len for r in batch.reqs)
+        assert len(batch.out_loc) == len(load_indices), (
+            f"out_loc/load_indices mismatch: {len(batch.out_loc)} vs {len(load_indices)}"
+        )
         # NOTE: write out_loc to page_table before `prepare_metadata`
         self.page_table.view(-1)[load_indices] = batch.out_loc
-        #self.engine.attn_backend.prepare_metadata(batch)
         return ForwardInput(
             batch=batch,
             sample_args=self.engine.sampler.prepare(batch),
@@ -239,30 +244,33 @@ class Scheduler(SchedulerIOMixin):
         logger.info_rank0("Scheduler is idle, waiting for new reqs...")
         self.cache_manager.check_integrity()
 
+    def overlap_loop(self, last_data: ForwardData | None) -> ForwardData | None:
+        """
+        The main loop of overlapping scheduling and execution.
+
+        It will overlap the execution of current batch and processing of last batch's results,
+        which can effectively hide CPU latency and improve GPU utilization.
+        """
+        blocking = not (
+            last_data is not None  # don't block if we have a batch to be processed
+            or self.prefill_manager.runnable
+            or self.decode_manager.runnable
+        )
+        for msg in self.receive_msg(blocking=blocking):
+            self._process_one_msg(msg)
+
+        forward_input = self._schedule_next_batch()
+        ongoing_data = None
+        if forward_input is not None:
+            ongoing_data = (forward_input, self._forward(forward_input))
+
+        self._process_last_data(last_data, ongoing_data)
+        return ongoing_data
+
     def normal_loop(self) -> None:
         blocking = not (self.prefill_manager.runnable or self.decode_manager.runnable)
         for msg in self.receive_msg(blocking=blocking):
             self._process_one_msg(msg)
-
-        """
-        # Fast test for model one-token decoding.
-        #input_ids = self.prefill_manager.pending_list[-1].input_ids
-        #attention_mask = torch.ones_like(input_ids)
-        #position_ids = attention_mask.long().cumsum(-1) - 1
-        m = self.engine.model.model
-        print(type(m))
-        print(hasattr(m, "lm_head"), hasattr(m, "get_output_embeddings"))
-        output = self.engine.model.model(
-            input_ids=input_ids.unsqueeze(0),
-            attention_mask=attention_mask.unsqueeze(0),
-            position_ids=position_ids.unsqueeze(0),
-            block_table=None,
-        )
-        logger.warning_rank0(type(output))
-        logger.warning_rank0(output) # only single token
-        logger.warning_rank0(output.tokens)
-        exit()
-        """
 
         forward_input = self._schedule_next_batch()
         ongoing_data = None
@@ -273,8 +281,14 @@ class Scheduler(SchedulerIOMixin):
 
     @torch.no_grad()
     def run_forever(self) -> NoReturn:
-        while True:
-            self.normal_loop()
+        if ENV.DISABLE_OVERLAP_SCHEDULING:
+            while True:
+                self.normal_loop()
+        else:
+            logger.error("xinux - Starting overlap scheduling loop...")
+            data = None
+            while True:
+                data = self.overlap_loop(data)
 
     def shutdown(self) -> None:
         #torch.cuda.synchronize(self.device)
