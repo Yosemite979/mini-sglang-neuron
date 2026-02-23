@@ -24,7 +24,6 @@ def main():
         max_running_req=4,
         tp_size=tp_size,
         #max_extend_tokens=16384,
-        cuda_graph_max_bs=256,
         num_page_override=8192,
     )
 

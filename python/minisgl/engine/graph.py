@@ -1,41 +1,17 @@
 from __future__ import annotations
 
-import gc
-from typing import TYPE_CHECKING, Dict, List
+import time
+from typing import TYPE_CHECKING
 
 import torch
 import torch_xla.core.xla_model as xm
-from minisgl.core import Batch, Req, get_global_ctx
-from minisgl.distributed import get_tp_info
+from minisgl.core import Batch, Req
 from minisgl.utils import init_logger
-from tqdm import tqdm
 
 if TYPE_CHECKING:
-    from minisgl.attention import BaseAttnBackend
-    from minisgl.models import BaseLLMModel
+    from .config import EngineConfig
 
 logger = init_logger(__name__)
-
-
-def _determine_cuda_graph_bs(
-    cuda_graph_bs: List[int] | None,
-    cuda_graph_max_bs: int | None,
-    free_memory: int,
-) -> List[int]:
-    if cuda_graph_bs is not None:
-        return cuda_graph_bs
-
-    free_memory_gb = free_memory / (1 << 30)
-    if cuda_graph_max_bs is None:
-        if free_memory_gb > 80:  # H200
-            cuda_graph_max_bs = 256
-        else:
-            cuda_graph_max_bs = 160
-
-    if cuda_graph_max_bs < 1:
-        return []
-
-    return [1, 2, 4] + list(range(8, cuda_graph_max_bs + 1, 8))
 
 
 def mem_GB(size: int) -> str:
@@ -43,7 +19,6 @@ def mem_GB(size: int) -> str:
 
 
 def get_free_memory(device: torch.device) -> int:
-    #return torch.cuda.mem_get_info(device)[0]
     mem_info_dict = xm.get_memory_info()
     return mem_info_dict["bytes_limit"] - mem_info_dict["bytes_used"]
 
@@ -51,97 +26,94 @@ def get_free_memory(device: torch.device) -> int:
 class GraphRunner:
     def __init__(
         self,
-        stream: torch.cuda.Stream,
-        device: torch.device,
-        model: BaseLLMModel,
-        attn_backend: BaseAttnBackend,
-        cuda_graph_bs: List[int] | None,
-        cuda_graph_max_bs: int | None,
-        free_memory: int,
+        config: EngineConfig,
+        page_table: torch.Tensor,
         max_seq_len: int,
-        vocab_size: int,
+        num_pages: int,
+        device: torch.device,
+        dummy_page: int,
         dummy_req: Req,
     ) -> None:
-        cuda_graph_bs = _determine_cuda_graph_bs(
-            cuda_graph_bs=cuda_graph_bs,
-            cuda_graph_max_bs=cuda_graph_max_bs,
-            free_memory=free_memory,
-        )
-        self.attn_backend = attn_backend
-        self.max_graph_bs = max(cuda_graph_bs) if cuda_graph_bs else 0
-        self.graph_bs_list = sorted(cuda_graph_bs)
-        self.dummy_req = dummy_req
-        self.stream = stream
+        from minisgl.neuron import NeuronInputBuilder, NeuronLoadConfig, get_neuron_model
+
         self.device = device
-        self.graph_map = self._capture_graphs(max_seq_len, vocab_size, model)
+        self.dummy_page = dummy_page
+        self.dummy_req = dummy_req
+        self.page_table = page_table
+        self.max_seq_len = max_seq_len
+        self.compile_only = False
 
-    def _capture_graphs(self, max_seq_len: int, vocab_size: int, model: BaseLLMModel):
-        graph_map: Dict[int, torch.cuda.CUDAGraph] = {}
-        if self.max_graph_bs == 0:
-            logger.info_rank0("CUDA graph is disabled.")
-            return graph_map
+        compile_kwargs = {}
+        if config.hlo_debug:
+            compile_kwargs["debug"] = True
+        if config.compile_dry_run:
+            compile_kwargs["dry_run"] = True
 
-        self.logits = torch.empty(
-            (self.max_graph_bs, vocab_size),
-            dtype=torch.float32,
-            device=self.device,
+        load_cfg = NeuronLoadConfig(
+            model_path=config.model_path,
+            hf_config=config.hf_config,
+            tp_degree=config.tp_info.size,
+            max_batch_size=config.max_running_req,
+            max_model_len=max_seq_len,
+            max_extend_tokens=config.max_extend_tokens,
+            block_size=config.page_size,
+            num_blocks=num_pages,
+            override_neuron_config=config.neuron_config_overrides,
+            compile_kwargs=compile_kwargs or None,
         )
-        self.attn_backend.init_capture_graph(max_seq_len=max_seq_len, bs_list=self.graph_bs_list)
+        self.model = get_neuron_model(load_cfg, init_only=config.compiled_model_path is not None)
+        if config.compiled_model_path is not None:
+            compiling_start_time = time.monotonic()
+            if not config.skip_compile and not config.on_cpu:
+                logger.info_rank0("Compiling and saving model...")
+                self.model.compile(
+                    config.compiled_model_path,
+                    debug=config.hlo_debug,
+                    dry_run=config.compile_dry_run,
+                )
+                total_compiling_time = time.monotonic() - compiling_start_time
+                logger.info_rank0(f"Compiling and tracing time: {total_compiling_time} seconds")
+            else:
+                logger.info_rank0("Skipping model compilation")
 
-        torch.cuda.synchronize(self.device)
-        torch.cuda.empty_cache()
-        torch.cuda.reset_peak_memory_stats(self.device)
+            if config.enable_torch_dist:
+                torch.distributed.barrier()
 
-        logger.info_rank0(f"Start capturing CUDA graphs with sizes: {self.graph_bs_list}")
-        free_memory = get_free_memory(self.device)
-        logger.info_rank0(f"Free GPU memory before capturing CUDA graphs: {mem_GB(free_memory)}")
+            if config.compile_only or config.compile_dry_run:
+                logger.info_rank0("Compile-only mode enabled; skipping model load and engine init.")
+                self.compile_only = True
+                return
 
-        pbar = tqdm(
-            sorted(self.graph_bs_list, reverse=True),
-            desc="Preparing for capturing CUDA graphs...",
-            unit="batch",
-            disable=not get_tp_info().is_primary(),  # disable for non-primary ranks
-        )
-        pool = None
-        for bs in pbar:
-            free_memory = get_free_memory(self.device)
-            pbar.desc = f"Capturing graphs: bs = {bs:<3} | avail_mem = {mem_GB(free_memory)}"
-            pbar.refresh()
-            graph = torch.cuda.CUDAGraph()
-            batch = Batch(reqs=[self.dummy_req] * bs, phase="decode")
-            self.attn_backend.prepare_for_capture(batch)
-            with get_global_ctx().forward_batch(batch):
-                self.logits[:bs] = model.forward()
-                with torch.cuda.graph(graph, pool=pool, stream=self.stream):
-                    self.logits[:bs] = model.forward()
-            if pool is None:
-                pool = graph.pool()
-            graph_map[bs] = graph
+            loading_start_time = time.monotonic()
+            if not config.on_cpu:
+                logger.info_rank0("Loading model to Neuron...")
+                self.model.load(config.compiled_model_path)
+            else:
+                logger.info_rank0("Loading model to CPU...")
+                if hasattr(self.model, "to_cpu"):
+                    self.model.to_cpu()
+                else:
+                    logger.warning("Model does not implement to_cpu(); keeping current device placement.")
+            model_loading_time = time.monotonic() - loading_start_time
+            logger.info_rank0(f"Total model loading time: {model_loading_time} seconds")
 
-        free_memory = get_free_memory(self.device)
-        logger.info_rank0(f"Free GPU memory after capturing CUDA graphs: {mem_GB(free_memory)}")
-        return graph_map
+        self.neuron_input_builder = NeuronInputBuilder(self.page_table, self.max_seq_len)
 
-    def can_use_cuda_graph(self, batch: Batch) -> bool:
-        return batch.is_decode and batch.size <= self.max_graph_bs
-
-    def replay(self, batch: Batch) -> torch.Tensor:
-        assert self.can_use_cuda_graph(batch)
-        g = self.graph_map[batch.padded_size]
-        self.attn_backend.prepare_for_replay(batch)
-        g.replay()
-        return self.logits[: batch.size]
 
     def pad_batch(self, batch: Batch) -> int:
-        padded_size = (  # choose the first available batch size
-            next(bs for bs in self.graph_bs_list if bs >= batch.size)
-            if self.can_use_cuda_graph(batch)
-            else batch.size
-        )
+        max_batch_size = self.model.neuron_config.batch_size
+        padded_size = max_batch_size if max_batch_size > batch.size else batch.size
         batch.padded_reqs = batch.reqs + [self.dummy_req] * (padded_size - batch.size)
         return batch.padded_size - batch.size
 
-    # NOTE: This must be called before freeing NCCL resources to prevent program hang
-    def destroy_cuda_graphs(self) -> None:
-        del self.graph_map
-        gc.collect()
+    def forward(self, batch: Batch) -> torch.Tensor:
+        model_input = self.neuron_input_builder.build(batch)
+        return self.model.forward(
+            input_ids=model_input.input_tokens,
+            position_ids=model_input.position_ids,
+            input_block_ids=model_input.input_block_ids,
+            slot_mapping=model_input.slot_mapping,
+            block_tables=model_input.block_tables,
+            full_context_lens=model_input.full_context_lens,
+            computed_context_lens=model_input.computed_context_lens,
+        )

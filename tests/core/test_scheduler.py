@@ -30,7 +30,6 @@ def main():
         tp_info=DistributedInfo(0, 1),
         dtype=torch.bfloat16,
         max_running_req=4,
-        cuda_graph_bs=[2, 4, 8],
     )
 
     mp.set_start_method("spawn", force=True)

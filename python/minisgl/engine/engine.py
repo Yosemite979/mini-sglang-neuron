@@ -3,8 +3,6 @@ from __future__ import annotations
 from datetime import timedelta
 from typing import Dict, NamedTuple, Tuple
 import gc
-import os
-import time
 
 import torch
 import torch_xla
@@ -12,14 +10,10 @@ import torch_xla.core.xla_model as xm
 import torch_xla.debug.metrics as met
 
 
-from minisgl.attention import create_attention_backend
-from minisgl.attention.neuron import NeuronAttnBackend
 from minisgl.core import Batch, Context, Req, set_global_ctx
-from minisgl.distributed import destroy_distributed, enable_pynccl_distributed, set_tp_info
-from minisgl.kvcache import create_kvcache
-from minisgl.layers import set_rope_device
-from minisgl.models import create_model, load_hf_weight
-from minisgl.utils import divide_even, init_logger, torch_dtype
+from minisgl.distributed import destroy_distributed, set_tp_info
+from minisgl.models import load_hf_weight
+from minisgl.utils import divide_even, init_logger
 
 from .config import EngineConfig
 from .graph import GraphRunner, get_free_memory, mem_GB
@@ -88,75 +82,12 @@ class Engine:
         #        self.page_table,
         #    )
 
-        #if self.use_neuron_model:
-        from minisgl.neuron import NeuronInputBuilder, NeuronLoadConfig, get_neuron_model
-
-        compile_kwargs = {}
-        if config.hlo_debug:
-            compile_kwargs["debug"] = True
-        if config.compile_dry_run:
-            compile_kwargs["dry_run"] = True
-
-        
-        load_cfg = NeuronLoadConfig(
-            model_path=config.model_path,
-            hf_config=config.hf_config,
-            tp_degree=config.tp_info.size,
-            max_batch_size=config.max_running_req,
-            max_model_len=self.max_seq_len,
-            max_extend_tokens=config.max_extend_tokens,
-            block_size=config.page_size,
-            num_blocks=self.num_pages,
-            override_neuron_config=config.neuron_config_overrides,
-            compile_kwargs=compile_kwargs or None,
-        )
-        self.model = get_neuron_model(load_cfg, init_only=config.compiled_model_path is not None)
-        if config.compiled_model_path is not None:
-            compiling_start_time = time.monotonic()
-            if not config.skip_compile and not config.on_cpu:
-                logger.info_rank0("Compiling and saving model...")
-                self.model.compile(
-                    config.compiled_model_path,
-                    debug=config.hlo_debug,
-                    dry_run=config.compile_dry_run,
-                )
-                total_compiling_time = time.monotonic() - compiling_start_time
-                logger.info_rank0(f"Compiling and tracing time: {total_compiling_time} seconds")
-            else:
-                logger.info_rank0("Skipping model compilation")
-
-            if config.enable_torch_dist:
-                torch.distributed.barrier()
-
-            if config.compile_only or config.compile_dry_run:
-                logger.info_rank0("Compile-only mode enabled; skipping model load and engine init.")
-                return
-
-            loading_start_time = time.monotonic()
-            if not config.on_cpu:
-                logger.info_rank0("Loading model to Neuron...")
-                self.model.load(config.compiled_model_path)
-            else:
-                logger.info_rank0("Loading model to CPU...")
-                if hasattr(self.model, "to_cpu"):
-                    self.model.to_cpu()
-                else:
-                    logger.warning("Model does not implement to_cpu(); keeping current device placement.")
-            model_loading_time = time.monotonic() - loading_start_time
-            logger.info_rank0(f"Total model loading time: {model_loading_time} seconds")
-
         self.attn_backend = None
         self.ctx = Context(page_size=1, attn_backend=self.attn_backend)
         set_global_ctx(self.ctx)
         self.sampler = Sampler(self.device, self.model_config.vocab_size)
-        self.neuron_input_builder = (
-            NeuronInputBuilder(self.page_table, self.max_seq_len) if self.use_neuron_model else None
-        )
 
-        post_free_memory = self._sync_get_memory()[0]
-        logger.info_rank0(f"Free memory after initialization: {mem_GB(post_free_memory)}")
-
-        # cuda graph related
+        # Dummy request/page for padded scheduling.
         self.dummy_req = Req(
             input_ids=torch.tensor([0], dtype=torch.int32, device="cpu"),
             table_idx=config.max_running_req,
@@ -167,32 +98,24 @@ class Engine:
             cache_handle=None,  # type: ignore
         )
         self.page_table[self.dummy_req.table_idx].fill_(self.dummy_page)
-
-        #if self.use_neuron_model:
-        #    self.graph_runner = _NoGraphRunner(self.dummy_req)
-        #else:
-        #    self.graph_runner = GraphRunner(
-        #        stream=self.stream,
-        #        device=self.device,
-        #        model=self.model,
-        #        attn_backend=self.attn_backend,
-        #        cuda_graph_bs=config.cuda_graph_bs,
-        #        cuda_graph_max_bs=config.cuda_graph_max_bs,
-        #        free_memory=init_free_memory,
-        #        max_seq_len=self.max_seq_len,
-        #        vocab_size=self.model_config.vocab_size,
-        #        dummy_req=self.dummy_req,
-        #    )
-    def pad_batch(self, batch: Batch) -> int:
-        max_batch_size = self.model.neuron_config.batch_size
-        padded_size = (  # choose the first available batch size
-            max_batch_size 
-            if max_batch_size > batch.size 
-            else batch.size
+        self.graph_runner = GraphRunner(
+            config=config,
+            page_table=self.page_table,
+            max_seq_len=self.max_seq_len,
+            num_pages=self.num_pages,
+            device=self.device,
+            dummy_page=self.dummy_page,
+            dummy_req=self.dummy_req,
         )
-        batch.padded_reqs = batch.reqs + [self.dummy_req] * (padded_size - batch.size)
-        logger.error(f"xinux - pad_batch: batch.size={batch.size}, extra_padded_size={padded_size-batch.size}")
-        return batch.padded_size - batch.size
+        self.model = self.graph_runner.model
+        if self.graph_runner.compile_only:
+            return
+
+        post_free_memory = self._sync_get_memory()[0]
+        logger.info_rank0(f"Free memory after initialization: {mem_GB(post_free_memory)}")
+
+    def pad_batch(self, batch: Batch) -> int:
+        return self.graph_runner.pad_batch(batch)
     
     def _init_communication(self, config: EngineConfig) -> torch.distributed.ProcessGroup:
         torch.distributed.init_process_group(
@@ -266,17 +189,7 @@ class Engine:
 
     def forward_batch(self, batch: Batch, args: BatchSamplingArgs) -> ForwardOutput:
         with self.ctx.forward_batch(batch):
-            assert self.neuron_input_builder is not None
-            model_input = self.neuron_input_builder.build(batch)
-            logits = self.model.forward(
-                input_ids=model_input.input_tokens,
-                position_ids=model_input.position_ids,
-                input_block_ids=model_input.input_block_ids,
-                slot_mapping=model_input.slot_mapping,
-                block_tables=model_input.block_tables,
-                full_context_lens=model_input.full_context_lens,
-                computed_context_lens=model_input.computed_context_lens,
-            )
+            logits = self.graph_runner.forward(batch)
 
         for req in batch.reqs:
             req.complete_one()
@@ -304,15 +217,6 @@ class Engine:
 class _NoOpEvent:
     def synchronize(self) -> None:
         return
-
-
-class _NoGraphRunner:
-    def __init__(self, dummy_req: Req) -> None:
-        self.dummy_req = dummy_req
-
-    def pad_batch(self, batch: Batch) -> int:
-        batch.padded_reqs = batch.reqs
-        return 0
 
 
 def _sample_cpu(logits: torch.Tensor, reqs: list[Req]) -> torch.Tensor:

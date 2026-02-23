@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import cached_property
-from typing import TYPE_CHECKING, Any, Dict, List
+from typing import TYPE_CHECKING, Any, Dict
 
 import torch
 import torch_xla
@@ -20,8 +20,6 @@ class EngineConfig:
     dtype: torch.dtype
     max_running_req: int = 256
     attention_backend: str = "auto"
-    cuda_graph_bs: List[int] | None = None
-    cuda_graph_max_bs: int | None = None
     page_size: int = 1
     memory_ratio: float = 0.9
     distributed_timeout: float = 60.0
