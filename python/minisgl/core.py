@@ -2,12 +2,11 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, List, Literal
+from typing import TYPE_CHECKING, Any, List, Literal
 
 import torch
 
 if TYPE_CHECKING:
-    from minisgl.attention import BaseAttnBackend, BaseAttnMetadata
     from minisgl.kvcache import BaseCacheHandle
 
 
@@ -74,8 +73,8 @@ class Batch:
     input_ids: torch.Tensor = field(init=False)
     out_loc: torch.Tensor = field(init=False)
     padded_reqs: List[Req] = field(init=False)  # may contain some dummy reqs for padding
-    # this field should be set by attention backend
-    attn_metadata: BaseAttnMetadata = field(init=False)
+    # this field is optional in the Neuron-first flow.
+    attn_metadata: Any = field(init=False)
 
     @property
     def is_prefill(self) -> bool:
@@ -97,7 +96,7 @@ class Batch:
 @dataclass
 class Context:
     page_size: int
-    attn_backend: BaseAttnBackend
+    attn_backend: Any
     _batch: Batch | None = field(default=None, init=False)
 
     @property

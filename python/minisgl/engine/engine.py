@@ -51,20 +51,7 @@ class Engine:
         init_free_memory = self._sync_get_memory()[1]
         logger.info_rank0(f"Free memory before loading model: {mem_GB(init_free_memory)}")
 
-        # load model and determine number of pages
-        """
-        set_rope_device(self.device)
-        """
         self.num_pages = self.dummy_page = self._determine_num_pages(init_free_memory, config)
-        #if self.use_neuron_model:
-        #    self.kv_cache = self.model.get_kv_caches()
-        #else:
-        #    self.kv_cache = create_kvcache(
-        #        model_config=config.model_config,
-        #        num_pages=self.num_pages + 1,  # +1 for dummy page
-        #        device=self.device,
-        #        dtype=self.dtype,
-        #    )
         # NOTE: make page table 128 aligned (32 * sizeof(int32) == 128 bytes)
         self.max_seq_len = _align_up_32(min(config.max_seq_len, self.num_pages))
         # The last page (with index `self.num_pages`) is reserved for dummy requests, which should never be allocated to real requests. This simplifies the handling of padded dummy requests and chunked requests that require padding.
@@ -72,15 +59,6 @@ class Engine:
             (config.max_running_req + 1, self.max_seq_len),
             device=self.device,
         )
-        #if self.use_neuron_model:
-        #    self.attn_backend = NeuronAttnBackend(self.page_table)
-        #else:
-        #    self.attn_backend = create_attention_backend(
-        #        config.attention_backend,
-        #        config.model_config,
-        #        self.kv_cache,
-        #        self.page_table,
-        #    )
 
         self.attn_backend = None
         self.ctx = Context(page_size=1, attn_backend=self.attn_backend)

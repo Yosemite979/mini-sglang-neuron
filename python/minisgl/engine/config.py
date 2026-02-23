@@ -19,7 +19,6 @@ class EngineConfig:
     tp_info: DistributedInfo
     dtype: torch.dtype
     max_running_req: int = 256
-    attention_backend: str = "auto"
     page_size: int = 1
     memory_ratio: float = 0.9
     distributed_timeout: float = 60.0

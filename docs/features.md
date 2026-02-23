@@ -29,15 +29,9 @@ Our framework currently supports the following dense model architectures:
 
 Chunked Prefill, a technique introduced by [Sarathi-Serve](https://arxiv.org/abs/2403.02310), is enabled by default. This feature splits long prompts into smaller chunks during the prefill phase, significantly reducing peak memory usage and preventing Out-Of-Memory (OOM) errors in long-context serving. The chunk size can be configured using `--max-prefill-length n`. Note that setting `n` to a very small value (e.g., 128) is not recommended as it may significantly degrade performance.
 
-## Attention Backends
+## Runtime Backend
 
-Mini-SGLang integrates high-performance attention kernels, including [`FlashAttention`](https://github.com/Dao-AILab/flash-attention) and [`FlashInfer`](https://github.com/flashinfer-ai/flashinfer). It supports using different backends for the prefill and decode phases to maximize efficiency. For example, on NVIDIA Hopper GPUs, `FlashAttention3` is used for prefill and `FlashInfer` for decoding by default.
-
-You can specify the backend using the `--attn` argument. If two values are provided (e.g., `--attn fa,fi`), the first specifies the prefill backend and the second the decode backend.
-
-## CUDA Graph
-
-To minimize CPU launch overhead during decoding, Mini-SGLang supports capturing and replaying CUDA graphs. This feature is enabled by default. The maximum batch size for CUDA graph capture can be set with `--cuda-graph-max-bs n`. Setting `n` to `0` disables this feature.
+The current Mini-SGLang runtime in this repository is Neuron/XLA-focused and does not expose CUDA attention backend selection or CUDA graph controls in the CLI.
 
 ## Radix Cache
 

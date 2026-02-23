@@ -61,7 +61,6 @@ def parse_args(args: List[str], run_shell: bool = False) -> Tuple[ServerArgs, bo
     Returns:
         EngineConfig instance with parsed arguments
     """
-    from minisgl.attention import validate_backend
     from minisgl.kvcache import SUPPORTED_CACHE_MANAGER
 
     parser = argparse.ArgumentParser(description="MiniSGL Server Arguments")
@@ -167,15 +166,6 @@ def parse_args(args: List[str], run_shell: bool = False) -> Tuple[ServerArgs, bo
         type=int,
         default=ServerArgs.num_page_override,
         help="Set the maximum number of pages for KVCache.",
-    )
-
-    parser.add_argument(
-        "--attention-backend",
-        "--attn",
-        type=validate_backend,
-        default=ServerArgs.attention_backend,
-        help="The attention backend to use. If two backends are specified,"
-        " the first one is used for prefill and the second one for decode.",
     )
 
     parser.add_argument(
