@@ -6,6 +6,8 @@ import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Tuple, overload
+from urllib.parse import urlparse
+from urllib.request import urlopen
 
 from minisgl.utils import UNSET, Unset, init_logger
 from openai import AsyncOpenAI as OpenAI
@@ -424,6 +426,8 @@ def read_qwen_trace(
         lines = f.readlines()
         if n is not None:
             lines = lines[:n]
+        print(f"Read {len(lines)} lines from {file_path}")
+        print(f"Example line: {lines[0] if len(lines) > 0 else 'N/A'}")
     objs = [JSONInput.model_validate_json(line) for line in lines]
     if dummy:
         prompt = generate_prompt(tokenizer, max(obj.input_length for obj in objs))

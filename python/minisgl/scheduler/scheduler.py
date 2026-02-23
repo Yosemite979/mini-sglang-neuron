@@ -4,7 +4,6 @@ from typing import TYPE_CHECKING, List, NamedTuple, NoReturn, Set, Tuple, TypeAl
 
 import torch
 import torch.nn.functional as F
-#import torch_xla
 import torch_xla.core.xla_model as xm
 
 from minisgl.core import Batch, Req
@@ -282,10 +281,11 @@ class Scheduler(SchedulerIOMixin):
     @torch.no_grad()
     def run_forever(self) -> NoReturn:
         if ENV.DISABLE_OVERLAP_SCHEDULING:
+            logger.info("Starting normal scheduling loop...")
             while True:
                 self.normal_loop()
         else:
-            logger.error("xinux - Starting overlap scheduling loop...")
+            logger.info("Starting overlap scheduling loop...")
             data = None
             while True:
                 data = self.overlap_loop(data)

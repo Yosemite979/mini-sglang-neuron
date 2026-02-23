@@ -32,10 +32,8 @@ The components communicate using **ZeroMQ (ZMQ)** for control messages and **NCC
 
 The source code is located in `python/minisgl`. Here is a breakdown of the modules for developers:
 
-- `minisgl.core`: Provides core dataclasses `Req` and `Batch` representing the state of requests, class `Context` which holds the global state of the inference context, and class `SamplingParams` holds the sampling parameters provided by users.
+- `minisgl.core`: Provides core dataclasses `Req` and `Batch` representing the state of requests, and class `SamplingParams` which holds user-provided sampling parameters.
 - `minisgl.distributed`: Provides the interface to all-reduce and all-gather in tensor parallelism, and dataclass `DistributedInfo` which holds the TP information for a TP worker.
-- `minisgl.layers`: Implements basic building blocks for building LLMs with TP support, including linear, layernorm, embedding, RoPE, etc. They share common base classes defined in `minisgl.layers.base`.
-- `minisgl.models`: Implements LLM models, including Llama and Qwen3. Also defines utilities for loading weights from huggingface and sharding weights.
 - `minisgl.kvcache`: Provides interface of KVCache pool and KVCache manager, and implements `MHAKVCache`, `NaiveCacheManager` and `RadixCacheManager`.
 - `minisgl.utils`: Provides a collection of utilities, including logger setup and wrappers around zmq.
 - `minisgl.engine`: Implements `Engine` class, which is a TP worker on a single process. It manages the model, context, KV cache, and model execution/runtime orchestration.

@@ -128,7 +128,6 @@ class NeuronModelBase(nn.Module):
         return sorted_inputs
 
     def _load_weights_common(self, model_name_or_path: str, neuronx_model_cls, **kwargs):
-        logger.error(f"xinux - {kwargs["neuron_config"]=}") 
         neuron_config = neuronx_model_cls.get_neuron_config_cls()(**kwargs["neuron_config"])
         config = neuronx_model_cls.get_config_cls()(
             neuron_config, load_config=load_pretrained_config(model_name_or_path)
@@ -233,10 +232,6 @@ class NeuronCausalLM(NeuronModelBase):
         block_tables: torch.Tensor,
         **kwargs,
     ) -> torch.Tensor:
-        #logger.error(f"xinux - {block_tables.shape=}, {input_ids.shape=}, {position_ids.shape=}")
-        #logger.error(f"xinux - {kwargs['full_context_lens'].shape=}, {kwargs['computed_context_lens'].shape=}")
-        #logger.error(f"xinux - {kwargs['full_context_lens']=}, {kwargs['computed_context_lens']=}")
-
         with self._reordered(
             input_block_ids,
             input_ids=input_ids,
@@ -334,7 +329,7 @@ def get_neuron_model(load_cfg: NeuronLoadConfig, *, init_only: bool = False) -> 
     architecture = _get_architecture(load_cfg.hf_config)
     model = NeuronCausalLM(load_cfg.hf_config)
     neuron_config = _default_neuron_config(load_cfg)
-    logger.error(f"xinux - {neuron_config}")
+    logger.info(f"{neuron_config=}")
     if init_only:
         model.init_for_compile(
             load_cfg.model_path,

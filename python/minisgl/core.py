@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, List, Literal
 
@@ -94,35 +93,20 @@ class Batch:
 
 
 @dataclass
-class Context:
-    page_size: int
-    attn_backend: Any
-    _batch: Batch | None = field(default=None, init=False)
-
-    @property
-    def batch(self) -> Batch:
-        assert self._batch is not None, "No active batch in context"
-        return self._batch
-
-    @contextmanager
-    def forward_batch(self, batch: Batch):
-        assert self._batch is None, "Nested forward_batch is not allowed"
-        try:
-            self._batch = batch
-            yield
-        finally:
-            self._batch = None
+class _LegacyContext:
+    # Kept only for legacy call sites that still access `get_global_ctx().batch`.
+    batch: Batch
+    attn_backend: Any = None
 
 
-_GLOBAL_CTX: Context | None = None
+_GLOBAL_BATCH: Batch | None = None
 
 
-def set_global_ctx(ctx: Context):
-    global _GLOBAL_CTX
-    assert _GLOBAL_CTX is None, "Global context is already set"
-    _GLOBAL_CTX = ctx
+def set_global_batch(batch: Batch | None) -> None:
+    global _GLOBAL_BATCH
+    _GLOBAL_BATCH = batch
 
 
-def get_global_ctx() -> Context:
-    assert _GLOBAL_CTX is not None, "Global context is not set"
-    return _GLOBAL_CTX
+def get_global_ctx() -> _LegacyContext:
+    assert _GLOBAL_BATCH is not None, "Global batch is not set"
+    return _LegacyContext(batch=_GLOBAL_BATCH)

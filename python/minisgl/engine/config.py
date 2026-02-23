@@ -2,15 +2,21 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import cached_property
-from typing import TYPE_CHECKING, Any, Dict
+from typing import Any, Dict
 
 import torch
 import torch_xla
 from minisgl.distributed import DistributedInfo
 from minisgl.utils import cached_load_hf_config
 
-if TYPE_CHECKING:
-    from minisgl.models import ModelConfig
+
+@dataclass(frozen=True)
+class ModelConfig:
+    num_layers: int
+    num_kv_heads: int
+    head_dim: int
+    vocab_size: int
+    max_position: int
 
 
 @dataclass(frozen=True)
@@ -42,15 +48,22 @@ class EngineConfig:
 
     @cached_property
     def model_config(self) -> ModelConfig:
-        from minisgl.models import ModelConfig
-
-        return ModelConfig.from_hf(self.hf_config)
+        cfg = self.hf_config
+        num_kv_heads = getattr(cfg, "num_key_value_heads", cfg.num_attention_heads)
+        head_dim = getattr(cfg, "head_dim", cfg.hidden_size // cfg.num_attention_heads)
+        return ModelConfig(
+            num_layers=cfg.num_hidden_layers,
+            num_kv_heads=num_kv_heads,
+            head_dim=head_dim,
+            vocab_size=cfg.vocab_size,
+            max_position=cfg.max_position_embeddings,
+        )
 
     @property
     def max_seq_len(self) -> int:
         if self.max_seq_len_override is not None:
             return self.max_seq_len_override
-        return self.model_config.rotary_config.max_position
+        return self.model_config.max_position
 
     @property
     def max_forward_len(self) -> int:

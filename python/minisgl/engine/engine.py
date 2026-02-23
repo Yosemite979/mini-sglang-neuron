@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
-from typing import Dict, NamedTuple, Tuple
+from typing import NamedTuple, Tuple
 import gc
 
 import torch
@@ -10,9 +10,8 @@ import torch_xla.core.xla_model as xm
 import torch_xla.debug.metrics as met
 
 
-from minisgl.core import Batch, Context, Req, set_global_ctx
+from minisgl.core import Batch, Req, set_global_batch
 from minisgl.distributed import destroy_distributed, set_tp_info
-from minisgl.models import load_hf_weight
 from minisgl.utils import divide_even, init_logger
 
 from .config import EngineConfig
@@ -60,9 +59,6 @@ class Engine:
             device=self.device,
         )
 
-        self.attn_backend = None
-        self.ctx = Context(page_size=1, attn_backend=self.attn_backend)
-        set_global_ctx(self.ctx)
         self.sampler = Sampler(self.device, self.model_config.vocab_size)
 
         # Dummy request/page for padded scheduling.
@@ -106,18 +102,6 @@ class Engine:
         tp_cpu_group = torch.distributed.group.WORLD
         assert tp_cpu_group is not None
         return tp_cpu_group
-
-    def _load_weight_state_dict(self, config: EngineConfig) -> Dict[str, torch.Tensor]:
-        if config.use_dummy_weight:
-            return {
-                k: torch.randn_like(v, device=self.device)
-                for k, v in self.model.state_dict().items()
-            }
-        else:
-            return {
-                k: v.to(self.dtype)
-                for k, v in load_hf_weight(config.model_path, self.device).items()
-            }
 
     def _determine_num_pages(self, old_free_memory: int, config: EngineConfig) -> int:
         new_free_memory = self._sync_get_memory()[1]
@@ -166,8 +150,11 @@ class Engine:
         return min_free_memory, max_free_memory
 
     def forward_batch(self, batch: Batch, args: BatchSamplingArgs) -> ForwardOutput:
-        with self.ctx.forward_batch(batch):
+        set_global_batch(batch)
+        try:
             logits = self.graph_runner.forward(batch)
+        finally:
+            set_global_batch(None)
 
         for req in batch.reqs:
             req.complete_one()

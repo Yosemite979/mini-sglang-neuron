@@ -70,7 +70,6 @@ class PrefillAdder:
         chunk_size = min(self.token_budget, remain_len)
         is_chunked = chunk_size < remain_len
         CLS = ChunkedReq if is_chunked else Req
-        logger.error(f"xinux - {CLS.__name__} for {pending_req.uid}, chunk_size={chunk_size}, remain_len={remain_len}")
         self.token_budget -= chunk_size
         self.reserved_size += remain_len + pending_req.output_len
         # NOTE: update the tokens ids only; new pages will be allocated in the scheduler

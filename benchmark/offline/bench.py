@@ -20,7 +20,7 @@ def main():
     llm = LLM(
         "Qwen/Qwen3-0.6B",
         max_seq_len_override=2048, 
-        max_extend_tokens=4006,
+        max_extend_tokens=4096,
         max_running_req=4,
         tp_size=tp_size,
         #max_extend_tokens=16384,
