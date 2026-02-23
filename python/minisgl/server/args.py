@@ -118,14 +118,6 @@ def parse_args(args: List[str], run_shell: bool = False) -> Tuple[ServerArgs, bo
         help="Use dummy weights for testing.",
     )
 
-    assert ServerArgs.use_pynccl == True
-    parser.add_argument(
-        "--disable-pynccl",
-        action="store_false",
-        dest="use_pynccl",
-        help="Disable PyNCCL for tensor parallelism.",
-    )
-
     parser.add_argument(
         "--host",
         type=str,

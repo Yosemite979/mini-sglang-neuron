@@ -13,7 +13,7 @@ Mini-SGLang is designed as a distributed system to handle Large Language Model (
 
 ### Data Flow
 
-The components communicate using **ZeroMQ (ZMQ)** for control messages and **NCCL** (via `torch.distributed`) for heavy tensor data exchange between GPUs.
+The components communicate using **ZeroMQ (ZMQ)** for control messages and `torch.distributed` for tensor data exchange between TP ranks.
 
 ![Process overview diagram](https://lmsys.org/images/blog/minisgl/design.drawio.png)
 
@@ -32,15 +32,18 @@ The components communicate using **ZeroMQ (ZMQ)** for control messages and **NCC
 
 The source code is located in `python/minisgl`. Here is a breakdown of the modules for developers:
 
-- `minisgl.core`: Provides core dataclasses `Req` and `Batch` representing the state of requests, and class `SamplingParams` which holds user-provided sampling parameters.
-- `minisgl.distributed`: Provides the interface to all-reduce and all-gather in tensor parallelism, and dataclass `DistributedInfo` which holds the TP information for a TP worker.
-- `minisgl.kvcache`: Provides interface of KVCache pool and KVCache manager, and implements `MHAKVCache`, `NaiveCacheManager` and `RadixCacheManager`.
-- `minisgl.utils`: Provides a collection of utilities, including logger setup and wrappers around zmq.
-- `minisgl.engine`: Implements `Engine` class, which is a TP worker on a single process. It manages the model, context, KV cache, and model execution/runtime orchestration.
-- `minisgl.message`: Defines messages exchanged (in zmq) between api_server, tokenizer, detokenizer and scheduler. All message types support automatic serialization and deserialization.
-- `minisgl.scheduler`: Implements `Scheduler` class, which runs on each TP worker process and manages the corresponding `Engine`. The rank 0 scheduler receives msgs from tokenizer, communicates with scheduler on other TP workers, and sends msgs to detokenizer.
-- `minisgl.server`: Defines cli arguments and `launch_server` which starts all the subprocesses of Mini-SGLang. Also implements a FastAPI server in `minisgl.server.api_server` acting as a frontend, providing endpoints such as `/v1/chat/completions`.
-- `minisgl.tokenizer`: Implements `tokenize_worker` function which handles tokenization and detokenization requests.
-- `minisgl.llm`: Provides class `LLM` as a python interface to interact with the Mini-SGLang system easily.
-- `minisgl.kernel`: Implements custom CUDA kernels, supported by `tvm-ffi` for python binding and jit interface.
-- `minisgl.benchmark`: Benchmark utilities.
+- `minisgl.core`: Core dataclasses for request/batch state (`Req`, `Batch`) and sampling config (`SamplingParams`).
+- `minisgl.distributed`: TP metadata/state helpers (`DistributedInfo`, `set/get/try_get_tp_info`) in `distributed/tp.py`.
+- `minisgl.engine`: Per-TP worker runtime (`Engine`, config, graph runner, sampling glue).
+- `minisgl.scheduler`: Scheduling pipeline (prefill/decode/table/cache managers + event loop + I/O mixins).
+- `minisgl.kvcache`: KV cache manager interfaces and implementations (`NaiveCacheManager`, `RadixCacheManager`).
+- `minisgl.neuron`: Neuron model loading and input-building adapters (`model_loader.py`, `inputs.py`).
+- `minisgl.message`: Message schemas/serialization used between frontend, scheduler, and tokenizer workers.
+- `minisgl.server`: CLI parsing, process launch orchestration, and FastAPI frontend server.
+- `minisgl.tokenizer`: Tokenize/detokenize worker implementations.
+- `minisgl.llm`: Offline/local Python interface (`LLM`) built on top of scheduler flow.
+- `minisgl.kernel`: Low-level `tvm-ffi` kernels; currently used by radix cache via CPU kernel `radix.cpp` (`fast_compare_key`).
+- `minisgl.benchmark`: Benchmark client helpers and result processing utilities.
+- `minisgl.utils`: Shared utilities (logger, HF config loading, registries, ZMQ wrappers, torch helpers, misc).
+- `minisgl.env`: Environment-variable backed runtime knobs.
+- `minisgl.shell`: Interactive shell frontend.

@@ -10,8 +10,8 @@ import torch_xla.core.xla_model as xm
 import torch_xla.debug.metrics as met
 
 
-from minisgl.core import Batch, Req, set_global_batch
-from minisgl.distributed import destroy_distributed, set_tp_info
+from minisgl.core import Batch, Req
+from minisgl.distributed import set_tp_info
 from minisgl.utils import divide_even, init_logger
 
 from .config import EngineConfig
@@ -22,9 +22,7 @@ logger = init_logger(__name__)
 
 
 class ForwardOutput(NamedTuple):
-    next_tokens_gpu: torch.Tensor
     next_tokens_cpu: torch.Tensor
-    copy_done_event: object
 
 
 def create_page_table(shape: Tuple[int, int], device: torch.device) -> torch.Tensor:
@@ -42,7 +40,6 @@ class Engine:
 
         self.stream = None # XLA does not support stream
         self.dtype = config.dtype
-        self.use_neuron_model = config.use_neuron_model
 
         self.device = torch.device("cpu") # Use cpu for management purpose
         
@@ -150,33 +147,21 @@ class Engine:
         return min_free_memory, max_free_memory
 
     def forward_batch(self, batch: Batch, args: BatchSamplingArgs) -> ForwardOutput:
-        set_global_batch(batch)
-        try:
-            logits = self.graph_runner.forward(batch)
-        finally:
-            set_global_batch(None)
+        logits = self.graph_runner.forward(batch)
 
         for req in batch.reqs:
             req.complete_one()
 
-        if self.use_neuron_model:
-            next_tokens_cpu = _sample_cpu(logits[: batch.size].to("cpu"), batch.reqs)
-            next_tokens_gpu = next_tokens_cpu.to(self.device)
-        else:
-            next_tokens_gpu = self.sampler.sample(logits[: batch.size], args).to(torch.int32)
-            next_tokens_cpu = next_tokens_gpu.to("cpu", non_blocking=True)
-        if self.use_neuron_model:
-            xm.mark_step()
-            copy_done_event = _NoOpEvent()
-        else:
-            copy_done_event = torch.cuda.Event()
-            copy_done_event.record(self.stream)
-        return ForwardOutput(next_tokens_gpu, next_tokens_cpu, copy_done_event)
+        # The logits from NxDI is already on CPU, so we can directly sample on CPU without an extra copy. 
+        next_tokens_cpu = _sample_cpu(logits[: batch.size], batch.reqs)
+
+        # There is no async copy in this case, but we keep the event for interface consistency and future extension.
+        xm.mark_step()  # Ensure all XLA operations are finished before sampling
+
+        return ForwardOutput(next_tokens_cpu)
 
     def shutdown(self) -> None:
-        #self.graph_runner.destroy_cuda_graphs()
         torch.distributed.destroy_process_group()
-        destroy_distributed()
 
 
 class _NoOpEvent:

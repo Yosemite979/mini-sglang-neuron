@@ -5,13 +5,13 @@ from typing import Dict, List, Tuple
 
 import torch
 from minisgl.core import SamplingParams
-from minisgl.distributed import DistributedInfo
 from minisgl.message import (
     BaseBackendMsg,
     DetokenizeMsg,
     UserMsg,
 )
 from minisgl.scheduler import Scheduler, SchedulerConfig
+from minisgl.distributed import DistributedInfo
 
 
 class RequestAllFinished(Exception):

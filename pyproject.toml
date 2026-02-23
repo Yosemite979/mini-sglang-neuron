@@ -24,10 +24,8 @@ classifiers = [
 dependencies = [
     "accelerate",
     "msgpack",
-    #"sgl_kernel>=0.3.17.post1",
     "torch",
     "transformers>=4.56.0,<=4.57.3",
-    #"flashinfer-python>=0.5.3",
     #"libneuronxla==2.2.14584.0+06ac23d1",
     "neuronx_distributed_inference==0.7.15063+bafa28d5",
     "neuronx-cc==2.22.12471.0+b4a00d10",
@@ -39,7 +37,6 @@ dependencies = [
     "prompt_toolkit",
     "openai",
     "apache-tvm-ffi>=0.1.4",
-    #"nvidia-cutlass-dsl==4.3.1",
 ]
 
 [project.optional-dependencies]

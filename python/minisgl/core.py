@@ -90,23 +90,3 @@ class Batch:
     @property
     def padded_size(self) -> int:
         return len(self.padded_reqs)
-
-
-@dataclass
-class _LegacyContext:
-    # Kept only for legacy call sites that still access `get_global_ctx().batch`.
-    batch: Batch
-    attn_backend: Any = None
-
-
-_GLOBAL_BATCH: Batch | None = None
-
-
-def set_global_batch(batch: Batch | None) -> None:
-    global _GLOBAL_BATCH
-    _GLOBAL_BATCH = batch
-
-
-def get_global_ctx() -> _LegacyContext:
-    assert _GLOBAL_BATCH is not None, "Global batch is not set"
-    return _LegacyContext(batch=_GLOBAL_BATCH)

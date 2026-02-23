@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
-class DistributedInfo:  # should not export from here
+class DistributedInfo:
     rank: int
     size: int
 
@@ -34,5 +34,3 @@ def get_tp_info() -> DistributedInfo:
 def try_get_tp_info() -> DistributedInfo | None:
     return _TP_INFO
 
-
-__all__ = ["DistributedInfo", "set_tp_info", "get_tp_info", "try_get_tp_info"]

@@ -77,8 +77,7 @@ class Scheduler(SchedulerIOMixin):
     ) -> None:
         if last_data is None:
             return
-        batch, (_, next_tokens_cpu, copy_done) = last_data[0].batch, last_data[1]
-        #copy_done.synchronize()
+        batch, (_, next_tokens_cpu) = last_data[0].batch, last_data[1]
         xm.wait_device_ops()
         reply: List[DetokenizeMsg] = []
 
@@ -228,7 +227,7 @@ class Scheduler(SchedulerIOMixin):
 
 
     def _write_token_ids(self, input: ForwardInput, output: ForwardOutput) -> None:
-        self.token_pool.view(-1)[input.write_indices] = output.next_tokens_gpu
+        self.token_pool.view(-1)[input.write_indices] = output.next_tokens_cpu
 
     def _forward(self, forward_input: ForwardInput) -> ForwardOutput:
         self._load_token_ids(forward_input)
@@ -287,6 +286,8 @@ class Scheduler(SchedulerIOMixin):
         else:
             logger.info("Starting overlap scheduling loop...")
             data = None
+            # TODO: NxDI does not support async execution now, so the overlap is not significant.
+            #   In the future, we can explore NxDI for async execution and further optimize the overlap.
             while True:
                 data = self.overlap_loop(data)
 

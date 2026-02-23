@@ -5,6 +5,7 @@ import time
 from dataclasses import dataclass
 from typing import Dict, List, Tuple
 
+from minisgl.kernel.radix import _load_radix_module
 import torch
 
 from .base import BaseCacheHandle, BaseCacheManager, SizeInfo
@@ -93,6 +94,7 @@ class RadixCacheManager(BaseCacheManager):
         self.root_node.ref_count = 1  # root is always protected
         self.evictable_size = 0
         self.protected_size = 0
+        _load_radix_module()
 
     def lock_handle(self, handle: BaseCacheHandle, unlock: bool = False) -> None:
         assert isinstance(handle, RadixCacheHandle)
