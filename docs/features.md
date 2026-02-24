@@ -22,7 +22,6 @@ To scale performance across multiple GPUs, Mini-SGLang supports Tensor Paralleli
 
 Our framework currently supports the following dense model architectures:
 
-- [`Llama-3`](https://huggingface.co/collections/meta-llama/llama-31) series
 - [`Qwen-3`](https://huggingface.co/collections/Qwen/qwen3) series
 
 ## Chunked Prefill
@@ -40,9 +39,3 @@ Adopting the original design from [SGLang](https://github.com/sgl-project/sglang
 ![radix](https://lmsys.org/images/blog/sglang/radix_attn.jpg)
 *Illustration of Radix Attention from [LMSYS Blog](https://lmsys.org/blog/2024-01-17-sglang/).*
 
-## Overlap Scheduling
-
-To further reduce CPU overhead, Mini-SGLang employs overlap scheduling, a technique proposed in [NanoFlow](https://arxiv.org/abs/2408.12757). This approach overlaps the CPU scheduling overhead with GPU computation, improving overall system throughput.
-
-![overlap](https://lmsys.org/images/blog/sglang_v0_4/scheduler.jpg)
-*Illustration of Overlap Scheduling from [LMSYS Blog](https://lmsys.org/blog/2024-12-04-sglang-v0-4/).*
