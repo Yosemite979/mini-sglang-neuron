@@ -116,7 +116,8 @@ class Engine:
             # Thus, we are not able to pre-determine the max available memory after the model is loaded.
             # For now, we just assume a hard-coded value as a workaround.
             num_pages = config.max_seq_len * config.max_running_req
-
+            
+            # TODO: find a better way to determine the number of pages. The current method is too conservative and may lead to under-utilization of memory.
             #model_memory = old_free_memory - new_free_memory
             #available_memory = int(config.memory_ratio * old_free_memory) - model_memory
             #num_pages = available_memory // cache_per_page

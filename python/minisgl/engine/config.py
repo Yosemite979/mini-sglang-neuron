@@ -23,9 +23,10 @@ class EngineConfig:
     model_path: str
     tp_info: DistributedInfo
     dtype: torch.dtype
-    max_running_req: int = 256
+    max_running_req: int = 6
     page_size: int = 1
-    memory_ratio: float = 0.9
+    # TODO: revisit memory_ratio after we have a better solution for determining the number of pages. 
+    #memory_ratio: float = 0.9
     distributed_timeout: float = 60.0
     use_dummy_weight: bool = False
     max_seq_len_override: int | None = None

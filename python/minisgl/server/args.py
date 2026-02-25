@@ -103,12 +103,13 @@ def parse_args(args: List[str], run_shell: bool = False) -> Tuple[ServerArgs, bo
         help="The maximum sequence length override.",
     )
 
-    parser.add_argument(
-        "--memory-ratio",
-        type=float,
-        default=ServerArgs.memory_ratio,
-        help="The fraction of GPU memory to use for KV cache.",
-    )
+    # TODO: revisit memory_ratio after we have a better solution for determining the number of pages. 
+    #parser.add_argument(
+    #    "--memory-ratio",
+    #    type=float,
+    #    default=ServerArgs.memory_ratio,
+    #    help="The fraction of GPU memory to use for KV cache.",
+    #)
 
     assert ServerArgs.use_dummy_weight == False
     parser.add_argument(

@@ -19,7 +19,7 @@ python -m minisgl \
   --dtype bfloat16 \
   --tp-size "$TP_SIZE" \
   --max-running-requests 6 \
-  --max-seq-len-override 4092 \
+  --max-seq-len-override 4096 \
   --num-pages 10192 \
   --port 1919 \
   --cache-type radix \

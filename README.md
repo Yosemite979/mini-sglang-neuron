@@ -43,7 +43,7 @@ Install Mini-SGLang directly from the source:
 
 ```bash
 git clone https://github.com/zilong-ai-infra/mini-sglang-neuron.git
-cd mini-sglang && bash init_setup.sh
+cd mini-sglang-neuron && bash init_setup.sh
 ```
 
 ### 3. Online Serving
@@ -51,8 +51,17 @@ cd mini-sglang && bash init_setup.sh
 Launch an OpenAI-compatible API server with a single command.
 
 ```bash
-# Deploy Qwen/Qwen3-0.6B on a single GPU
-python -m minisgl --model-path "Qwen/Qwen3-0.6B" --tp-size 2
+# Deploy Qwen/Qwen3-0.6B on inf2.xlarge 
+export TP_SIZE=2
+export NEURON_RT_NUM_CORES="${TP_SIZE}"
+python -m minisgl \
+  --model-path "Qwen/Qwen3-0.6B" \
+  --dtype bfloat16 \
+  --tp-size "$TP_SIZE" \
+  --max-running-requests 6 \
+  --max-seq-len-override 4096 \
+  --num-pages 10192 \
+  --port 1919
 ```
 
 Once the server is running, you can send requests using standard tools like `curl` or any OpenAI-compatible client.
@@ -68,16 +77,16 @@ python -m minisgl \
   --model-path "Qwen/Qwen3-0.6B" \
   --dtype bfloat16 \
   --tp-size "$TP_SIZE" \
-  --max-running-requests 5 \
+  --max-running-requests 6 \
   --max-seq-len-override 4096 \
-  --num-pages 2048 \
+  --num-pages 10192 \
   --port 1919 \
   --shell-mode
-```
+``` 
 
 You can also use `/reset` to clear the chat history.
 
-## Benchmark
+## Profiling
 
 ### Offline inference
 
@@ -85,13 +94,14 @@ See [bench.py](./benchmark/offline/bench.py) for more details. Set `MINISGL_DISA
 
 Test Configuration:
 
-- Hardware: 1xH200 GPU.
-- Model: Qwen3-0.6B, Qwen3-14B
+- Hardware: inf2.xlarge, two Neuron Cores.
+- Model: Qwen3-0.6B
 - Total Requests: 256 sequences
 - Input Length: Randomly sampled between 100-1024 tokens
 - Output Length: Randomly sampled between 100-1024 tokens
 
-![offline](https://lmsys.org/images/blog/minisgl/offline.png)
+Metrics:
+- Total: 75759tok, Time: 500.05s, Throughput: 151.50tok/s
 
 ### Online inference
 
@@ -99,7 +109,7 @@ See [benchmark_qwen.py](./benchmark/online/bench_qwen.py) for more details.
 
 Test Configuration:
 
-- Hardware: 4xH200 GPU, connected by NVLink.
+- Hardware: inf2.xlarge, two Neuron Cores.
 - Model: Qwen3-0.6B
 - Dataset: [Qwen trace](https://media.githubusercontent.com/media/alibaba-edu/qwen-bailian-usagetraces-anon/refs/heads/main/qwen_traceA_blksz_16.jsonl"), replaying first 1000 requests.
 
@@ -107,14 +117,21 @@ Launch command:
 
 ```bash
 # Mini-SGLang
-python -m minisgl --model-path "Qwen/Qwen3-0.6B" --tp-size 2 --cache-type naive
+export TP_SIZE=2
+export NEURON_RT_NUM_CORES="${TP_SIZE}"
+python -m minisgl \
+  --model-path "Qwen/Qwen3-0.6B" \
+  --dtype bfloat16 \
+  --tp-size "$TP_SIZE" \
+  --max-running-requests 6 \
+  --max-seq-len-override 4096 \
+  --num-pages 10192 \
+  --port 1919
 
-# SGLang
-python3 -m sglang.launch_server --model "Qwen/Qwen3-32B" --tp 2 \
-    --disable-radix --port 1919 --decode-attention flashinfer
 ```
 
-![online](https://lmsys.org/images/blog/minisgl/online.png)
+Metrics:
+  - TBD
 
 ## 📚 Learn More
 
