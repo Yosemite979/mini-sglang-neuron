@@ -1,7 +1,3 @@
-<p align="center">
-<img width="400" src="/assets/logo.png">
-</p>
-
 # Mini-SGLang-Neuron
 
 A **lightweight inference framework** for Large Language Models.
@@ -34,13 +30,11 @@ We recommend using Docker to spin up container with official [pytorch-inference-
 docker run --pull=missing -it --rm \
   --privileged \
   --network host \
-  --volume /home/ec2-user/data:/root/data \
   --shm-size=32g \
   --ulimit memlock=-1 \
   --ulimit stack=67108864 \
-  --device=/dev/neuron0 \
-  --device=/dev/neuron1 \  # <-- Only two Neuron cores in inf2.xlarge. Adjust it accordingly when using larger instance.
-  public.ecr.aws/neuron/pytorch-inference-neuronx:2.9.0-neuronx-py312-sdk2.27.1-ubuntu24.04 
+  public.ecr.aws/neuron/pytorch-inference-neuronx:2.9.0-neuronx-py312-sdk2.27.1-ubuntu24.04 \
+  bash
 ```
 
 ### 2. Installation

@@ -284,28 +284,10 @@ class NeuronCausalLM(NeuronModelBase):
 
 
 def _default_neuron_config(load_cfg: NeuronLoadConfig) -> Dict[str, Any]:
-    """
+    # TODO: Investigate other config defaults and overrides for different models and use cases
+    #   e.g. chunked_prefill_config, ctx_batch_size, is_continuous_batching, etc.
     neuron_config: Dict[str, Any] = {
         "tp_degree": load_cfg.tp_degree,
-        "ctx_batch_size": 1,
-        "batch_size": load_cfg.max_batch_size,
-        "max_context_length": load_cfg.max_model_len,
-        "max_new_tokens": load_cfg.max_extend_tokens,
-        "pa_block_size": 16, #load_cfg.block_size,
-        "pa_num_blocks": load_cfg.num_blocks,
-        "is_block_kv_layout": False,
-        "is_prefix_caching": False,
-        #"chunked_prefill_config": None,
-        "attn_kernel_enabled": False,
-        "output_logits": True,
-        "on_device_sampling_config": OnDeviceSamplingConfig(dynamic=True, deterministic=False),
-        "seq_len": load_cfg.max_model_len, 
-    }
-
-    """
-    neuron_config: Dict[str, Any] = {
-        "tp_degree": load_cfg.tp_degree,
-        #"ctx_batch_size": 1,
         "batch_size": load_cfg.max_batch_size,
         "max_context_length": load_cfg.max_model_len,
         "max_new_tokens": load_cfg.max_extend_tokens,
@@ -314,7 +296,7 @@ def _default_neuron_config(load_cfg: NeuronLoadConfig) -> Dict[str, Any]:
         "is_block_kv_layout": True,
         "is_prefix_caching": True,
         #"chunked_prefill_config": None,
-        #"is_continuous_batching": (load_cfg.max_batch_size>1),
+        "is_continuous_batching": (load_cfg.max_batch_size>1),
         "attn_kernel_enabled": False,
         "output_logits": True,
         "on_device_sampling_config": OnDeviceSamplingConfig(dynamic=True, deterministic=False),

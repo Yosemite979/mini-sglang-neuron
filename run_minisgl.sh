@@ -12,18 +12,15 @@ if ! command -v g++ >/dev/null 2>&1 && ! command -v clang++ >/dev/null 2>&1; the
   exit 1
 fi
 
-unset NEURON_VISIBLE_DEVICES
-
 export TP_SIZE=2
 export NEURON_RT_NUM_CORES="${TP_SIZE}"
-echo "NEURON_VISIBLE_DEVICES=${NEURON_VISIBLE_DEVICES:-<unset>} NEURON_RT_NUM_CORES=${NEURON_RT_NUM_CORES:-<unset>} NEURON_RT_VISIBLE_CORES=${NEURON_RT_VISIBLE_CORES:-<unset>}"
 python -m minisgl \
   --model-path /root/data/Qwen/Qwen3-0.6B \
   --dtype bfloat16 \
   --tp-size "$TP_SIZE" \
-  --max-running-requests 5 \
-  --max-seq-len-override 4096 \
-  --num-pages 2048 \
+  --max-running-requests 6 \
+  --max-seq-len-override 4092 \
+  --num-pages 10192 \
   --port 1919 \
   --cache-type radix \
   --shell 2>&1 | tee /root/data/sgl.log

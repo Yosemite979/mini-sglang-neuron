@@ -77,7 +77,7 @@ class Scheduler(SchedulerIOMixin):
     ) -> None:
         if last_data is None:
             return
-        batch, (_, next_tokens_cpu) = last_data[0].batch, last_data[1]
+        batch, (next_tokens_cpu,) = last_data[0].batch, last_data[1]
         xm.wait_device_ops()
         reply: List[DetokenizeMsg] = []
 

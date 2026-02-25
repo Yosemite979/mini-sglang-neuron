@@ -1,4 +1,4 @@
-# Features of Mini-SGLang
+# Features of Mini-SGLang-Neuron
 
 ## Online Serving
 
@@ -30,11 +30,11 @@ Chunked Prefill, a technique introduced by [Sarathi-Serve](https://arxiv.org/abs
 
 ## Runtime Backend
 
-The current Mini-SGLang runtime in this repository is Neuron/XLA-focused and does not expose CUDA attention backend selection or CUDA graph controls in the CLI.
+The current Mini-SGLang-Neuron runtime in this repository is Neuron/XLA-focused and does not expose CUDA attention backend selection or CUDA graph controls in the CLI.
 
 ## Radix Cache
 
-Adopting the original design from [SGLang](https://github.com/sgl-project/sglang.git), Mini-SGLang implements a Radix Cache to manage the Key-Value (KV) cache. This allows the reuse of KV cache for shared prefixes across requests, reducing redundant computation. This feature is enabled by default but can be switched to a naive cache management strategy using `--cache naive`.
+Adopting the original design from [SGLang](https://github.com/sgl-project/sglang.git), Mini-SGLang-Neuron integrates Radix Cache with the NxDI block KV cache manager to manage the Key-Value (KV) cache. This allows the reuse of KV cache for shared prefixes across requests, reducing redundant computation. This feature is enabled by default but can be switched to a naive cache management strategy using `--cache naive`.
 
 ![radix](https://lmsys.org/images/blog/sglang/radix_attn.jpg)
 *Illustration of Radix Attention from [LMSYS Blog](https://lmsys.org/blog/2024-01-17-sglang/).*

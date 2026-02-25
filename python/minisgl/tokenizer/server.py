@@ -4,7 +4,6 @@ import multiprocessing as mp
 from typing import List
 
 import torch
-import torch_xla # enable Neuron XLA torch
 
 from minisgl.message import (
     BaseBackendMsg,
