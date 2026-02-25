@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import functools
 from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
@@ -18,22 +17,3 @@ def torch_dtype(dtype: torch.dtype):
         yield
     finally:
         torch.set_default_dtype(old_dtype)
-
-
-def nvtx_annotate(name: str, layer_id_field: str | None = None):
-    #import torch.cuda.nvtx as nvtx
-    import torch_xla.debug.profiler as xp
-
-    def decorator(fn):
-        @functools.wraps(fn)
-        def wrapper(self, *args, **kwargs):
-            display_name = name
-            if layer_id_field and hasattr(self, layer_id_field):
-                display_name = name.format(getattr(self, layer_id_field))
-            #with nvtx.range(display_name):
-            #with xp.Trace(display_name):
-            return fn(self, *args, **kwargs)
-
-        return wrapper
-
-    return decorator

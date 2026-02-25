@@ -152,8 +152,8 @@ class Engine:
         for req in batch.reqs:
             req.complete_one()
 
-        # The logits from NxDI is already on CPU, so we can directly sample on CPU without an extra copy. 
-        next_tokens_cpu = _sample_cpu(logits[: batch.size], batch.reqs)
+        # The logits from NxDI are already on CPU, so sampler can consume them directly.
+        next_tokens_cpu = self.sampler.sample(logits[: batch.size], args)
 
         # There is no async copy in this case, but we keep the event for interface consistency and future extension.
         xm.mark_step()  # Ensure all XLA operations are finished before sampling
@@ -167,32 +167,3 @@ class Engine:
 class _NoOpEvent:
     def synchronize(self) -> None:
         return
-
-
-def _sample_cpu(logits: torch.Tensor, reqs: list[Req]) -> torch.Tensor:
-    output = torch.empty((len(reqs),), dtype=torch.int32)
-    for i, req in enumerate(reqs):
-        params = req.sampling_params
-        row = logits[i].float()
-        if not params.is_greedy and params.temperature > 0:
-            row = row / params.temperature
-        if params.top_k and params.top_k > 0:
-            topk = torch.topk(row, k=min(params.top_k, row.numel()))
-            probs = torch.softmax(topk.values, dim=-1)
-            idx = torch.multinomial(probs, 1)
-            token = topk.indices[idx]
-        elif params.top_p < 1.0:
-            probs = torch.softmax(row, dim=-1)
-            sorted_probs, sorted_idx = torch.sort(probs, descending=True)
-            cumulative = torch.cumsum(sorted_probs, dim=-1)
-            mask = cumulative <= params.top_p
-            mask[0] = True
-            filtered_probs = sorted_probs[mask]
-            filtered_idx = sorted_idx[mask]
-            filtered_probs = filtered_probs / filtered_probs.sum()
-            idx = torch.multinomial(filtered_probs, 1)
-            token = filtered_idx[idx]
-        else:
-            token = torch.argmax(row, dim=-1)
-        output[i] = token.item()
-    return output

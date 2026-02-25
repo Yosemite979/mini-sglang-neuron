@@ -5,7 +5,6 @@ from functools import cached_property
 from typing import Any, Dict
 
 import torch
-import torch_xla
 from minisgl.distributed import DistributedInfo
 from minisgl.utils import cached_load_hf_config
 
