@@ -20,11 +20,21 @@ Mini-SGLang-Neuron is a compact implementation of [SGLang](https://github.com/sg
 
 ## 🚀 Quick Start
 
-> **⚠️ Platform Support**: Mini-SGLang currently supports **AWS Trainium 2 and Inferentia 2 only**.
+> **⚠️ Platform Support**: Mini-SGLang-Neuron currently supports **AWS Trainium (Trn) and Inferentia (Inf) only**.
+
+### 0. Setup AWS Trn/Inf Instance
+
+User can choose any cloud service that vends AWS Trn/Inf. We take Yotta Labs as an example for Trn1 instance setup.
+
+1. Go to https://www.yottalabs.ai/. 
+2. Click `LAUNCH CONSOLE` on the top right and login.
+3. On the left side bar, click `Compute -> Virtual Machines`. 
+4. Select Region `us-west-2`, and select the provider `AWS`. 
+5. Choose `Trainium1` and other desired configuration. Click `Launch` to start the virtual machine.
 
 ### 1. Environment Setup
 
-We recommend using Docker to spin up container with official [pytorch-inference-neuronx](https://github.com/aws-neuron/deep-learning-containers) image for fast setup. Below is an example to spin up container in inf2.xlarge:
+We recommend using Docker to spin up container with official [pytorch-inference-neuronx](https://github.com/aws-neuron/deep-learning-containers) image for fast setup. Below is an example to spin up the container:
 
 ```
 docker run --pull=missing -it --rm \
@@ -51,7 +61,7 @@ cd mini-sglang-neuron && bash init_setup.sh
 Launch an OpenAI-compatible API server with a single command.
 
 ```bash
-# Deploy Qwen/Qwen3-0.6B on inf2.xlarge 
+# Deploy Qwen/Qwen3-0.6B 
 export TP_SIZE=2
 export NEURON_RT_NUM_CORES="${TP_SIZE}"
 python -m minisgl \
