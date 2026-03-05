@@ -52,11 +52,31 @@ docker run --pull=missing -it --rm \
 Install Mini-SGLang directly from the source:
 
 ```bash
-git clone https://github.com/zilong-ai-infra/mini-sglang-neuron.git
+git clone https://github.com/yottalabsai/mini-sglang-neuron.git
 cd mini-sglang-neuron && bash init_setup.sh
 ```
 
-### 3. Online Serving
+### 3. Interactive Shell
+
+Chat with your model directly in the terminal by adding the `--shell-mode` flag.
+
+```bash
+export TP_SIZE=2
+export NEURON_RT_NUM_CORES="${TP_SIZE}"
+python -m minisgl \
+  --model-path "Qwen/Qwen3-0.6B" \
+  --dtype bfloat16 \
+  --tp-size "$TP_SIZE" \
+  --max-running-requests 6 \
+  --max-seq-len-override 4096 \
+  --num-pages 10192 \
+  --port 1919 \
+  --shell-mode
+``` 
+
+You can also use `/reset` to clear the chat history.
+
+### 4. Online Serving
 
 Launch an OpenAI-compatible API server with a single command.
 
@@ -76,25 +96,7 @@ python -m minisgl \
 
 Once the server is running, you can send requests using standard tools like `curl` or any OpenAI-compatible client.
 
-### 4. Interactive Shell
 
-Chat with your model directly in the terminal by adding the `--shell-mode` flag.
-
-```bash
-export TP_SIZE=2
-export NEURON_RT_NUM_CORES="${TP_SIZE}"
-python -m minisgl \
-  --model-path "Qwen/Qwen3-0.6B" \
-  --dtype bfloat16 \
-  --tp-size "$TP_SIZE" \
-  --max-running-requests 6 \
-  --max-seq-len-override 4096 \
-  --num-pages 10192 \
-  --port 1919 \
-  --shell-mode
-``` 
-
-You can also use `/reset` to clear the chat history.
 
 ## Profiling
 
@@ -140,8 +142,6 @@ python -m minisgl \
 
 ```
 
-Metrics:
-  - TBD
 
 ## 📚 Learn More
 
