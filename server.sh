@@ -23,3 +23,6 @@ python -m minisgl \
   --num-pages 10192 \
   --port 1919 \
   --cache-type radix
+
+# After starting the server, you can test it with:
+#   python3 benchmark/online/simple_call.py --prompt "hello" --max-tokens 500 --temperature 0.6 --top-k -1
