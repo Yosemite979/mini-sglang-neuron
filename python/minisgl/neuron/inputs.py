@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import copy
 from dataclasses import dataclass
-from typing import List
-
 import torch
 
 from minisgl.core import Batch
@@ -19,6 +17,7 @@ class ModelInputForNeuron:
     input_tokens: torch.Tensor
     position_ids: torch.Tensor
     input_block_ids: torch.Tensor
+    sampling_params: torch.Tensor
     slot_mapping: torch.Tensor
     block_tables: torch.Tensor
     full_context_lens: torch.Tensor
@@ -37,11 +36,10 @@ class NeuronInputBuilder:
         return self._build_decode_input(batch)
 
     def _build_prefill_input(self, batch: Batch) -> ModelInputForNeuron:
-        reqs = batch.padded_reqs
+        reqs = batch.reqs
         batch_size = len(reqs)
         device = batch.input_ids.device
-        device_lens = [req.device_len for req in reqs]
-        max_device_len = max(device_lens) if device_lens else 0
+        sampling_params = torch.ones((batch_size, 3), dtype=torch.float32, device=device)
 
         input_tokens = torch.full(
             (batch_size, self.max_seq_len),
@@ -83,6 +81,7 @@ class NeuronInputBuilder:
             input_tokens=input_tokens,
             position_ids=position_ids,
             input_block_ids=input_block_ids,
+            sampling_params=sampling_params,
             slot_mapping=slot_mapping,
             block_tables=block_tables,
             full_context_lens=full_context_lens,
@@ -95,6 +94,9 @@ class NeuronInputBuilder:
         device = batch.input_ids.device
         extend_lens = [req.extend_len for req in reqs]
         max_extend_len = max(extend_lens) if extend_lens else 0
+        sampling_params = torch.ones((batch_size, 3), dtype=torch.float32, device=device)
+        used_seq_ids = {req.table_idx for req in reqs[: batch.size]}  # only real requests, excluding dummy requests
+        dummy_req_ids = iter(i for i in range(batch_size) if i not in used_seq_ids)
 
         input_tokens = torch.full(
             (batch_size, max_extend_len),
@@ -113,10 +115,11 @@ class NeuronInputBuilder:
 
         offset = 0
         for i, req in enumerate(reqs):
+            is_real_req = req in batch.reqs
             ext_len = req.extend_len
             dev_len = req.device_len
             cached_len = req.cached_len
-            if ext_len > 0:
+            if is_real_req and ext_len > 0:
                 tokens = batch.input_ids[offset : offset + ext_len]
                 input_tokens[i, :ext_len] = tokens
                 position_ids[i, :ext_len] = torch.arange(
@@ -125,7 +128,9 @@ class NeuronInputBuilder:
                 block_tables[i, :dev_len] = self._build_block_tables(req)
                 slot_mapping[i, :ext_len] = block_tables[i, cached_len : cached_len + ext_len]
                 offset += ext_len
-            input_block_ids[i] = req.table_idx
+                input_block_ids[i] = req.table_idx
+            else:
+                input_block_ids[i] = next(dummy_req_ids)
 
         full_context_lens = torch.tensor(
             [req.device_len for req in reqs], dtype=torch.int32, device=device
@@ -138,6 +143,7 @@ class NeuronInputBuilder:
             input_tokens=input_tokens,
             position_ids=position_ids,
             input_block_ids=input_block_ids,
+            sampling_params=sampling_params,
             slot_mapping=slot_mapping,
             block_tables=block_tables,
             full_context_lens=full_context_lens,

@@ -20,7 +20,6 @@ python -m minisgl \
   --tp-size "$TP_SIZE" \
   --max-running-requests 4 \
   --max-seq-len-override 1024 \
-  --num-pages 1192 \
+  --num-pages 10192 \
   --port 1919 \
-  --cache-type radix \
-  --shell 2>&1 | tee /root/data/sgl.log
+  --cache-type radix

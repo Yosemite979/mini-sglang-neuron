@@ -47,10 +47,11 @@ class Engine:
         init_free_memory = self._sync_get_memory()[1]
         logger.info_rank0(f"Free memory before loading model: {mem_GB(init_free_memory)}")
 
-        self.num_pages = self.dummy_page = self._determine_num_pages(init_free_memory, config)
+        self.num_pages = self._determine_num_pages(init_free_memory, config)
+        self.dummy_page = 0
         # NOTE: make page table 128 aligned (32 * sizeof(int32) == 128 bytes)
         self.max_seq_len = _align_up_32(min(config.max_seq_len, self.num_pages))
-        # The last page (with index `self.num_pages`) is reserved for dummy requests, which should never be allocated to real requests. This simplifies the handling of padded dummy requests and chunked requests that require padding.
+        # Page ID 0 is reserved for dummy/padded requests. Real cache pages use IDs 1..num_pages.
         self.page_table = create_page_table(  # + 1 for dummy request
             (config.max_running_req + 1, self.max_seq_len),
             device=self.device,
@@ -73,7 +74,7 @@ class Engine:
             config=config,
             page_table=self.page_table,
             max_seq_len=self.max_seq_len,
-            num_pages=self.num_pages,
+            num_pages=self.num_pages + 1,
             device=self.device,
             dummy_page=self.dummy_page,
             dummy_req=self.dummy_req,
@@ -163,8 +164,3 @@ class Engine:
 
     def shutdown(self) -> None:
         torch.distributed.destroy_process_group()
-
-
-class _NoOpEvent:
-    def synchronize(self) -> None:
-        return

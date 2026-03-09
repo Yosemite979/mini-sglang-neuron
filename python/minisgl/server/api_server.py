@@ -69,11 +69,12 @@ class OpenAICompletionRequest(BaseModel):
     prompt: str | None = None
     messages: List[Message] | None = None
 
-    max_tokens: int = 16
-    temperature: float = 1.0
+    # Use optional fields so endpoints can apply unified defaults when omitted.
+    max_tokens: int | None = None
+    temperature: float | None = None
 
-    top_k: int = -1
-    top_p: float = 1.0
+    top_k: int | None = None
+    top_p: float | None = None
     n: int = 1
     stream: bool = False
     stop: List[str] = []
@@ -94,6 +95,18 @@ class ModelCard(BaseModel):
 class ModelList(BaseModel):
     object: str = "list"
     data: List[ModelCard] = Field(default_factory=list)
+
+
+def _sampling_params_from_request(req: OpenAICompletionRequest) -> SamplingParams:
+    return SamplingParams(
+        ignore_eos=req.ignore_eos,
+        max_tokens=req.max_tokens if req.max_tokens is not None else ENV.SHELL_MAX_TOKENS.value,
+        temperature=(
+            req.temperature if req.temperature is not None else ENV.SHELL_TEMPERATURE.value
+        ),
+        top_k=req.top_k if req.top_k is not None else ENV.SHELL_TOP_K.value,
+        top_p=req.top_p if req.top_p is not None else ENV.SHELL_TOP_P.value,
+    )
 
 
 @dataclass
@@ -257,13 +270,7 @@ async def v1_completions(req: OpenAICompletionRequest):
         TokenizeMsg(
             uid=uid,
             text=prompt,
-            sampling_params=SamplingParams(
-                ignore_eos=req.ignore_eos,
-                max_tokens=req.max_tokens,
-                temperature=req.temperature,
-                top_k=req.top_k,
-                top_p=req.top_p,
-            ),
+            sampling_params=_sampling_params_from_request(req),
         )
     )
 
@@ -294,13 +301,7 @@ async def shell_completion(req: OpenAICompletionRequest):
         TokenizeMsg(
             uid=uid,
             text=prompt,
-            sampling_params=SamplingParams(
-                ignore_eos=req.ignore_eos,
-                max_tokens=req.max_tokens,
-                temperature=req.temperature,
-                top_k=req.top_k,
-                top_p=req.top_p,
-            ),
+            sampling_params=_sampling_params_from_request(req),
         )
     )
 

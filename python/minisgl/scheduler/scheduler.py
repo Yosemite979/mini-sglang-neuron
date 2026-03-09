@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, List, NamedTuple, NoReturn, Set, Tuple, TypeAlias
 
 import torch
-import torch.nn.functional as F
+import torch_xla
 import torch_xla.core.xla_model as xm
 
 from minisgl.core import Batch, Req
@@ -47,7 +47,6 @@ ForwardData: TypeAlias = "Tuple[ForwardInput, ForwardOutput]"
 class Scheduler(SchedulerIOMixin):
     def __init__(self, config: SchedulerConfig):
         from minisgl.engine import Engine
-        import torch_xla
 
         self.engine = Engine(config)
         # Initialize the I/O mixin
@@ -139,21 +138,15 @@ class Scheduler(SchedulerIOMixin):
             raise NotImplementedError
 
     def _prepare_batch(self, batch: Batch) -> ForwardInput:
-        padding_size = self.engine.pad_batch(batch)
-        # Allocate pages for real requests only. Padded dummy requests must map to dummy_page.
+        self.engine.pad_batch(batch)
         needed_size = sum(r.extend_len for r in batch.reqs)
         batch.out_loc = self.cache_manager.allocate(needed_size)
-        # NOTE: Pad the batch if needed
-        
-        # neuronx-distributed-inference will auto pad to the sequence length.
-        if padding_size:
-            batch.out_loc = F.pad(batch.out_loc, (0, padding_size), value=self.engine.dummy_page)
         # NOTE: prepare 2d indices for token ids loading and writing
         load_indices = self._make_2d_indices(
-            [(r.table_idx, r.cached_len, r.device_len) for r in batch.padded_reqs]
+            [(r.table_idx, r.cached_len, r.device_len) for r in batch.reqs]
         )
         full_load_indices = self._make_2d_indices(
-            [(r.table_idx, 0, r.device_len) for r in batch.padded_reqs]
+            [(r.table_idx, 0, r.device_len) for r in batch.reqs]
         )
         write_indices = self._make_2d_indices(
             [
@@ -292,7 +285,6 @@ class Scheduler(SchedulerIOMixin):
                 data = self.overlap_loop(data)
 
     def shutdown(self) -> None:
-        #torch.cuda.synchronize(self.device)
         torch_xla.sync()
         xm.wait_device_ops()
         self.sync_all_ranks()

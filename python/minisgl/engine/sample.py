@@ -46,6 +46,11 @@ class Sampler:
 
     def sample(self, logits: torch.Tensor, args: BatchSamplingArgs) -> torch.Tensor:
         # NxDI send logits to CPU by default.
+        # when args.temperatures is None all requests are greedy: simply take argmax
+        if args.temperatures is None:
+            # logits shape: (N, vocab_size)
+            # return int32 tensor of selected indices
+            return torch.argmax(logits, dim=-1).to(dtype=torch.int32)
         return self._sample_cpu(logits, args)
 
     def _sample_cpu(self, logits: torch.Tensor, args: BatchSamplingArgs) -> torch.Tensor:

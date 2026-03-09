@@ -101,6 +101,10 @@ class GraphRunner:
 
 
     def pad_batch(self, batch: Batch) -> int:
+        if batch.is_prefill:
+            batch.padded_reqs = batch.reqs
+            return 0
+
         max_batch_size = self.model.neuron_config.batch_size
         padded_size = max_batch_size if max_batch_size > batch.size else batch.size
         batch.padded_reqs = batch.reqs + [self.dummy_req] * (padded_size - batch.size)
@@ -112,6 +116,7 @@ class GraphRunner:
             input_ids=model_input.input_tokens,
             position_ids=model_input.position_ids,
             input_block_ids=model_input.input_block_ids,
+            sampling_params=model_input.sampling_params,
             slot_mapping=model_input.slot_mapping,
             block_tables=model_input.block_tables,
             full_context_lens=model_input.full_context_lens,

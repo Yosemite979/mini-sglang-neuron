@@ -14,7 +14,7 @@ from typing import Any, Dict
 import re
 import torch
 import torch.nn as nn
-from neuronx_distributed_inference.models.config import NeuronConfig, OnDeviceSamplingConfig
+from neuronx_distributed_inference.models.config import NeuronConfig
 from neuronx_distributed_inference.utils.constants import MODEL_TYPES
 from neuronx_distributed_inference.utils.hf_adapter import load_pretrained_config
 from transformers import AutoModelForCausalLM, PretrainedConfig
@@ -244,7 +244,11 @@ class NeuronCausalLM(NeuronModelBase):
                 attention_mask=None,
                 seq_ids=sorted_ids,
                 block_table=inputs["block_tables"],
-                **{k: v for k, v in inputs.items() if k not in ["input_ids", "block_tables"]},
+                **{
+                    k: v
+                    for k, v in inputs.items()
+                    if k not in ["input_ids", "block_tables"]
+                },
             )
             logits = output.logits if hasattr(output, "logits") else output
             if logits.dim() == 3:
@@ -288,6 +292,8 @@ def _default_neuron_config(load_cfg: NeuronLoadConfig) -> Dict[str, Any]:
     #   e.g. chunked_prefill_config, ctx_batch_size, is_continuous_batching, etc.
     neuron_config: Dict[str, Any] = {
         "tp_degree": load_cfg.tp_degree,
+        "ctx_batch_size": 1,
+        "enable_bucketing": False,
         "batch_size": load_cfg.max_batch_size,
         "max_context_length": load_cfg.max_model_len,
         "max_new_tokens": load_cfg.max_extend_tokens,
@@ -298,8 +304,6 @@ def _default_neuron_config(load_cfg: NeuronLoadConfig) -> Dict[str, Any]:
         #"chunked_prefill_config": None,
         "is_continuous_batching": (load_cfg.max_batch_size>1),
         "attn_kernel_enabled": False,
-        "output_logits": True,
-        "on_device_sampling_config": OnDeviceSamplingConfig(dynamic=True, deterministic=False),
         "seq_len": load_cfg.max_model_len, 
     }
     if load_cfg.override_neuron_config:

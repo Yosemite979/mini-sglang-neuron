@@ -12,7 +12,8 @@ if TYPE_CHECKING:
 class CacheManager:
     def __init__(self, device: torch.device, num_pages: int, type: str):
         # TODO: support page_size > 1
-        self._free_slots = torch.arange(num_pages, dtype=torch.int32, device=device)
+        # Page ID 0 is reserved for dummy padding, so real cache pages are 1..num_pages.
+        self._free_slots = torch.arange(1, num_pages + 1, dtype=torch.int32, device=device)
         self.device = device
         self.manager = create_cache_manager(device=device, type=type)
         self.num_pages = num_pages

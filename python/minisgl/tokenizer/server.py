@@ -61,8 +61,6 @@ def tokenize_worker(
             while len(pending_msg) < local_bs and not recv_listener.empty():
                 pending_msg.extend(_unwrap_msg(recv_listener.get()))
 
-            logger.debug(f"Received {len(pending_msg)} messages")
-
             detokenize_msg = [m for m in pending_msg if isinstance(m, DetokenizeMsg)]
             tokenize_msg = [m for m in pending_msg if isinstance(m, TokenizeMsg)]
             assert len(detokenize_msg) + len(tokenize_msg) == len(pending_msg)
