@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from typing import TYPE_CHECKING, List, NamedTuple, NoReturn, Set, Tuple, TypeAlias
 
 import torch
@@ -138,6 +139,7 @@ class Scheduler(SchedulerIOMixin):
             raise NotImplementedError
 
     def _prepare_batch(self, batch: Batch) -> ForwardInput:
+        prepare_start = time.perf_counter()
         self.engine.pad_batch(batch)
         needed_size = sum(r.extend_len for r in batch.reqs)
         batch.out_loc = self.cache_manager.allocate(needed_size)
@@ -164,21 +166,41 @@ class Scheduler(SchedulerIOMixin):
         )
         # NOTE: write out_loc to page_table before `prepare_metadata`
         self.page_table.view(-1)[load_indices] = batch.out_loc
-        return ForwardInput(
+        forward_input = ForwardInput(
             batch=batch,
             sample_args=self.engine.sampler.prepare(batch),
             load_indices=load_indices,
             full_load_indices=full_load_indices,
             write_indices=write_indices,
         )
+        prepare_elapsed = (time.perf_counter() - prepare_start) * 1000
+        logger.debug(
+            "[PERF] _prepare_batch: %.2fms [phase=%s batch=%d extend_tokens=%d]",
+            prepare_elapsed,
+            batch.phase,
+            batch.size,
+            needed_size,
+        )
+        return forward_input
 
     def _schedule_next_batch(self) -> ForwardInput | None:
+        schedule_start = time.perf_counter()
         # TODO: support other policies: e.g. DECODE first
         batch = (
             self.prefill_manager.schedule_next_batch(self.prefill_budget)
             or self.decode_manager.schedule_next_batch()
         )
-        return self._prepare_batch(batch) if batch else None
+        schedule_elapsed = (time.perf_counter() - schedule_start) * 1000
+        if batch is None:
+            logger.debug("[PERF] _schedule_next_batch: %.2fms [empty]", schedule_elapsed)
+            return None
+        logger.debug(
+            "[PERF] _schedule_next_batch: %.2fms [phase=%s batch=%d]",
+            schedule_elapsed,
+            batch.phase,
+            batch.size,
+        )
+        return self._prepare_batch(batch)
 
     def _make_2d_indices(self, ranges: List[Tuple[int, int, int]]) -> torch.Tensor:
         """
@@ -213,21 +235,47 @@ class Scheduler(SchedulerIOMixin):
         return indices_host.to(self.device, non_blocking=True)
 
     def _load_token_ids(self, input: ForwardInput) -> None:
+        load_start = time.perf_counter()
         if input.batch.is_prefill:
             input.batch.input_ids = self.token_pool.view(-1)[input.full_load_indices]
         else:
             input.batch.input_ids = self.token_pool.view(-1)[input.load_indices]
+        load_elapsed = (time.perf_counter() - load_start) * 1000
+        logger.debug(
+            "[PERF] _load_token_ids: %.2fms [phase=%s batch=%d tokens=%d]",
+            load_elapsed,
+            input.batch.phase,
+            input.batch.size,
+            len(input.batch.input_ids),
+        )
 
 
     def _write_token_ids(self, input: ForwardInput, output: ForwardOutput) -> None:
+        write_start = time.perf_counter()
         self.token_pool.view(-1)[input.write_indices] = output.next_tokens_cpu
+        write_elapsed = (time.perf_counter() - write_start) * 1000
+        logger.debug(
+            "[PERF] _write_token_ids: %.2fms [phase=%s batch=%d tokens=%d]",
+            write_elapsed,
+            input.batch.phase,
+            input.batch.size,
+            len(output.next_tokens_cpu),
+        )
 
     def _forward(self, forward_input: ForwardInput) -> ForwardOutput:
+        forward_start = time.perf_counter()
         self._load_token_ids(forward_input)
         batch, sample_args = forward_input.batch, forward_input.sample_args
         forward_output = self.engine.forward_batch(batch, sample_args)
         self._write_token_ids(forward_input, forward_output)
         self.decode_manager.filter_reqs(forward_input.batch.reqs)
+        forward_elapsed = (time.perf_counter() - forward_start) * 1000
+        logger.debug(
+            "[PERF] _forward total: %.2fms [phase=%s batch=%d]",
+            forward_elapsed,
+            batch.phase,
+            batch.size,
+        )
         return forward_output
 
     def run_when_idle(self) -> None:

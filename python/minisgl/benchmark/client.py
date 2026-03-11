@@ -410,6 +410,7 @@ def read_qwen_trace(
     file_path: str,
     tokenizer: Any,
     n: int | None = None,
+    max_input_len: int | None = None,
     dummy: bool = False,
 ) -> List[BenchmarkTrace]:
     class JSONInput(BaseModel):
@@ -424,9 +425,12 @@ def read_qwen_trace(
 
     with open(file_path, "r") as f:
         lines = f.readlines()
-        if n is not None:
-            lines = lines[:n]
     objs = [JSONInput.model_validate_json(line) for line in lines]
+    if max_input_len is not None:
+        objs = [obj for obj in objs if obj.input_length <= max_input_len]
+        print(f"Filtered {len(lines) - len(objs)} traces with input_length > {max_input_len}, remaining {len(objs)} traces.")
+    if n is not None:
+        objs = objs[:n]
     if dummy:
         prompt = generate_prompt(tokenizer, max(obj.input_length for obj in objs))
         ids = tokenizer.encode(prompt, add_special_tokens=False)

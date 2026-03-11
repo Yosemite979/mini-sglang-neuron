@@ -18,9 +18,9 @@ python -m minisgl \
   --model-path /root/data/Qwen/Qwen3-0.6B \
   --dtype bfloat16 \
   --tp-size "$TP_SIZE" \
-  --max-running-requests 4 \
-  --max-seq-len-override 1024 \
-  --num-pages 1192 \
+  --max-running-requests 1 \
+  --max-seq-len-override 8192 \
+  --num-pages 8192 \
   --port 1919 \
   --cache-type radix \
   --shell 2>&1 | tee /root/data/sgl.log

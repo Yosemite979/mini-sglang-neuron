@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
+import time
 from typing import NamedTuple, Tuple
 import gc
 
@@ -149,16 +150,39 @@ class Engine:
         return min_free_memory, max_free_memory
 
     def forward_batch(self, batch: Batch, args: BatchSamplingArgs) -> ForwardOutput:
+        forward_start = time.perf_counter()
         logits = self.graph_runner.forward(batch)
+        model_elapsed = (time.perf_counter() - forward_start) * 1000
+        logger.debug(
+            "[PERF] model_execution: %.2fms [phase=%s batch=%d]",
+            model_elapsed,
+            batch.phase,
+            batch.size,
+        )
 
         for req in batch.reqs:
             req.complete_one()
 
         # The logits from NxDI are already on CPU, so sampler can consume them directly.
+        sample_start = time.perf_counter()
         next_tokens_cpu = self.sampler.sample(logits[: batch.size], args)
+        sample_elapsed = (time.perf_counter() - sample_start) * 1000
+        logger.debug(
+            "[PERF] sample_tokens: %.2fms [phase=%s batch=%d]",
+            sample_elapsed,
+            batch.phase,
+            batch.size,
+        )
 
         # There is no async copy in this case, but we keep the event for interface consistency and future extension.
         xm.mark_step()  # Ensure all XLA operations are finished before sampling
+        total_elapsed = (time.perf_counter() - forward_start) * 1000
+        logger.debug(
+            "[PERF] forward_batch total: %.2fms [phase=%s batch=%d]",
+            total_elapsed,
+            batch.phase,
+            batch.size,
+        )
 
         return ForwardOutput(next_tokens_cpu)
 

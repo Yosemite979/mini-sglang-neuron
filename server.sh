@@ -12,17 +12,20 @@ if ! command -v g++ >/dev/null 2>&1 && ! command -v clang++ >/dev/null 2>&1; the
   exit 1
 fi
 
+# Enable PERF DEBUG logging for debugging performance issues. This will log detailed timing information for each stage of the request processing, which can help identify bottlenecks.
+# export LOG_LEVEL=DEBUG
+
 export TP_SIZE=2
 export NEURON_RT_NUM_CORES="${TP_SIZE}"
 python -m minisgl \
   --model-path /root/data/Qwen/Qwen3-0.6B \
   --dtype bfloat16 \
   --tp-size "$TP_SIZE" \
-  --max-running-requests 4 \
-  --max-seq-len-override 1024 \
-  --num-pages 10192 \
+  --max-running-requests 6 \
+  --max-seq-len-override 2048 \
+  --num-pages 16384 \
   --port 1919 \
-  --cache-type radix
+  --cache-type naive
 
 # After starting the server, you can test it with:
 #   python3 benchmark/online/simple_call.py --prompt "hello" --max-tokens 500 --temperature 0.6 --top-k -1
