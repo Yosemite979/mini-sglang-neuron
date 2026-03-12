@@ -117,18 +117,17 @@ pip install --extra-index-url=https://pip.repos.neuron.amazonaws.com -e .
 
 ### Offline inference
 
-See [bench.py](./benchmark/offline/bench.py) for more details. Set `MINISGL_DISABLE_OVERLAP_SCHEDULING=1` for ablation study on overlap scheduling.
+See [bench.py](./benchmark/offline/bench.py) for more details on `mini-sglang-neuron` profiling. See [bench_vllm_neuron.py](./benchmark/offline/bench_vllm_neuron.py) on `vllm-neuron` profiling.
 
 Test Configuration:
 
-- Hardware: inf2.xlarge, two Neuron Cores.
+- Hardware: trn1.xlarge, two Neuron Cores.
 - Model: Qwen3-0.6B
 - Total Requests: 256 sequences
 - Input Length: Randomly sampled between 100-1024 tokens
 - Output Length: Randomly sampled between 100-1024 tokens
 
-Metrics:
-- Total: 75759tok, Time: 500.05s, Throughput: 151.50tok/s
+![Offline benchmark](./docs/offline_bench.png)
 
 ### Online inference
 
@@ -136,11 +135,11 @@ See [bench_qwen.py](./benchmark/online/bench_qwen.py) for more details.
 
 Test Configuration:
 
-- Hardware: inf2.xlarge, two Neuron Cores.
+- Hardware: trn1.xlarge, two Neuron Cores.
 - Model: Qwen3-0.6B
-- Dataset: [Qwen trace](https://media.githubusercontent.com/media/alibaba-edu/qwen-bailian-usagetraces-anon/refs/heads/main/qwen_traceA_blksz_16.jsonl"), replaying first 1000 requests.
+- Dataset: [Qwen trace](https://media.githubusercontent.com/media/alibaba-edu/qwen-bailian-usagetraces-anon/refs/heads/main/qwen_traceA_blksz_16.jsonl"), replaying first 500 requests with no more than 1024 input token length.
 
-Launch command: see [server.sh](./server.sh).
+Server startup command for `mini-sglang-neuron`: see [server.sh](./server.sh).
 
 ```bash
 # Mini-SGLang
@@ -157,7 +156,7 @@ python -m minisgl \
   --cache-type naive
 ```
 
-Comparison server startup command for `vllm-neuron`.
+Server startup command for `vllm-neuron`.
 
 ```bash
 export TP_SIZE=2
