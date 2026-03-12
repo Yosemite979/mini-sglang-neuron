@@ -19,11 +19,10 @@ def main():
     # align the hyperparameters
     llm = LLM(
         "Qwen/Qwen3-0.6B",
-        max_seq_len_override=4096, 
-        max_extend_tokens=16384,
+        max_seq_len_override=2048, 
         max_running_req=6,
         tp_size=tp_size, 
-        num_page_override=10192,
+        num_page_override=16384,
     )
 
     prompt_token_ids = [

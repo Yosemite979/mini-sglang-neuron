@@ -96,9 +96,24 @@ python -m minisgl \
 
 Once the server is running, you can send requests using standard tools like `curl` or any OpenAI-compatible client.
 
+```bash
+python3 benchmark/online/simple_call.py --prompt "hello"
+```
+
 
 
 ## Profiling
+
+We use `vllm-neuron` as the comparison baseline for the profiling tests below.
+
+Comparison installation command for `vllm-neuron`.
+
+```bash
+git clone https://github.com/vllm-project/vllm-neuron.git
+cd vllm-neuron
+
+pip install --extra-index-url=https://pip.repos.neuron.amazonaws.com -e .
+```
 
 ### Offline inference
 
@@ -117,7 +132,7 @@ Metrics:
 
 ### Online inference
 
-See [benchmark_qwen.py](./benchmark/online/bench_qwen.py) for more details.
+See [bench_qwen.py](./benchmark/online/bench_qwen.py) for more details.
 
 Test Configuration:
 
@@ -125,22 +140,51 @@ Test Configuration:
 - Model: Qwen3-0.6B
 - Dataset: [Qwen trace](https://media.githubusercontent.com/media/alibaba-edu/qwen-bailian-usagetraces-anon/refs/heads/main/qwen_traceA_blksz_16.jsonl"), replaying first 1000 requests.
 
-Launch command:
+Launch command: see [server.sh](./server.sh).
 
 ```bash
 # Mini-SGLang
 export TP_SIZE=2
 export NEURON_RT_NUM_CORES="${TP_SIZE}"
 python -m minisgl \
-  --model-path "Qwen/Qwen3-0.6B" \
+  --model-path /root/data/Qwen/Qwen3-0.6B \
   --dtype bfloat16 \
   --tp-size "$TP_SIZE" \
   --max-running-requests 6 \
-  --max-seq-len-override 4096 \
-  --num-pages 10192 \
-  --port 1919
-
+  --max-seq-len-override 2048 \
+  --num-pages 16384 \
+  --port 1919 \
+  --cache-type naive
 ```
+
+Comparison server startup command for `vllm-neuron`.
+
+```bash
+export TP_SIZE=2
+export NEURON_RT_NUM_CORES="${TP_SIZE}"
+export DISABLE_NEURON_CUSTOM_SCHEDULER=1
+
+vllm serve /root/data/Qwen/Qwen3-0.6B \
+  --dtype bfloat16 \
+  --tensor-parallel-size "${TP_SIZE}" \
+  --max-num-seqs 6 \
+  --max-model-len 2048 \
+  --port 1919 \
+  --enable-chunked-prefill \
+  --max-num-batched-tokens 256 \
+  --block-size 128 \
+  --num-gpu-blocks-override 128 \
+  --no-enable-prefix-caching \
+  --additional-config '{"override_neuron_config":{"chunked_prefill_config":{"max_num_seqs":6,"kernel_q_tile_size":128,"kernel_kv_tile_size":4096}}}'
+```
+
+Client command:
+
+```bash
+python benchmark/online/bench_qwen.py
+```
+
+![Online benchmark](./docs/online_bench.png)
 
 
 ## 📚 Learn More

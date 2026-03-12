@@ -37,12 +37,13 @@ def download_qwen_trace(url: str) -> str:
 async def main():
     random.seed(42)  # reproducibility
     PORT = 1919
-    N = 1000
-    SCALES = [0.4, 0.5, 0.6, 0.7, 0.8, 1.6]  # from fast to slow
+    N = 500
+    MAX_INPUT_LEN = 1024
+    SCALES = [0.5, 1.0, 1.5, 2.0, 2.5]  # from fast to slow
     async with OpenAI(base_url=f"http://127.0.0.1:{PORT}/v1", api_key="") as client:
         MODEL = await get_model_name(client)
         tokenizer = AutoTokenizer.from_pretrained(MODEL)
-        TRACES = read_qwen_trace(download_qwen_trace(URL), tokenizer, n=N, dummy=True)
+        TRACES = read_qwen_trace(download_qwen_trace(URL), tokenizer, n=N, dummy=True, max_input_len=MAX_INPUT_LEN)
         logger.info(f"Start benchmarking with {N} requests using model {MODEL}...")
         for scale in SCALES:
             traces = scale_traces(TRACES, scale)
