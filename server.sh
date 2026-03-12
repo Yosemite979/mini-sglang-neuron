@@ -22,6 +22,7 @@ python -m minisgl \
   --dtype bfloat16 \
   --tp-size "$TP_SIZE" \
   --max-running-requests 6 \
+  --max-prefill-length 256 \
   --max-seq-len-override 2048 \
   --num-pages 16384 \
   --port 1919 \
