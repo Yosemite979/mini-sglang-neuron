@@ -146,7 +146,7 @@ Server startup command for `mini-sglang-neuron`: see [server.sh](./server.sh).
 export TP_SIZE=2
 export NEURON_RT_NUM_CORES="${TP_SIZE}"
 python -m minisgl \
-  --model-path /root/data/Qwen/Qwen3-0.6B \
+  --model-path Qwen/Qwen3-0.6B \
   --dtype bfloat16 \
   --tp-size "$TP_SIZE" \
   --max-running-requests 6 \
@@ -159,22 +159,30 @@ python -m minisgl \
 Server startup command for `vllm-neuron`.
 
 ```bash
-export TP_SIZE=2
-export NEURON_RT_NUM_CORES="${TP_SIZE}"
-export DISABLE_NEURON_CUSTOM_SCHEDULER=1
+ADDITIONAL_CONFIG=$(cat <<'EOF'
+{
+  "override_neuron_config": {
+    "is_prefix_caching": true,
+    "is_block_kv_layout": true,
+    "pa_num_blocks": 128,
+    "pa_block_size": 128
+  }
+}
+EOF
+)
 
-vllm serve /root/data/Qwen/Qwen3-0.6B \
+# Note that chunked prefill is not supported as of 0.4.1
+vllm serve Qwen/Qwen3-0.6B \
   --dtype bfloat16 \
   --tensor-parallel-size "${TP_SIZE}" \
   --max-num-seqs 6 \
   --max-model-len 2048 \
   --port 1919 \
-  --enable-chunked-prefill \
-  --max-num-batched-tokens 256 \
+  --no-enable-chunked-prefill \
+  --max-num-batched-tokens 8192 \
   --block-size 128 \
   --num-gpu-blocks-override 128 \
-  --no-enable-prefix-caching \
-  --additional-config '{"override_neuron_config":{"chunked_prefill_config":{"max_num_seqs":6,"kernel_q_tile_size":128,"kernel_kv_tile_size":4096}}}'
+  --additional-config "${ADDITIONAL_CONFIG}"
 ```
 
 Client command:

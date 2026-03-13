@@ -18,11 +18,11 @@ fi
 export TP_SIZE=2
 export NEURON_RT_NUM_CORES="${TP_SIZE}"
 python -m minisgl \
-  --model-path /root/data/Qwen/Qwen3-0.6B \
+  --model-path Qwen/Qwen3-0.6B \
   --dtype bfloat16 \
   --tp-size "$TP_SIZE" \
   --max-running-requests 6 \
-  --max-prefill-length 256 \
+  --max-prefill-length 8192 \
   --max-seq-len-override 2048 \
   --num-pages 16384 \
   --port 1919 \

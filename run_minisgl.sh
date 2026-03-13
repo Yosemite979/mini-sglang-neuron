@@ -15,7 +15,7 @@ fi
 export TP_SIZE=2
 export NEURON_RT_NUM_CORES="${TP_SIZE}"
 python -m minisgl \
-  --model-path /root/data/Qwen/Qwen3-0.6B \
+  --model-path Qwen/Qwen3-0.6B \
   --dtype bfloat16 \
   --tp-size "$TP_SIZE" \
   --max-running-requests 1 \
@@ -23,4 +23,6 @@ python -m minisgl \
   --num-pages 8192 \
   --port 1919 \
   --cache-type radix \
-  --shell 2>&1 | tee /root/data/sgl.log
+  --shell
+  
+  # 2>&1 | tee /root/data/sgl.log

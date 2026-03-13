@@ -10,7 +10,6 @@ def main():
 
     tp_size = 2
     os.environ["NEURON_RT_NUM_CORES"] = f"{tp_size}"
-    os.environ["DISABLE_NEURON_CUSTOM_SCHEDULER"] = "1"  # keep only if your env actually expects it
 
     num_seqs = 256
     max_input_len = 1024
@@ -26,7 +25,15 @@ def main():
         enable_chunked_prefill=False,
         max_num_batched_tokens=8192,
         block_size=128,
-        num_gpu_blocks_override=96,
+        num_gpu_blocks_override=128,
+        additional_config={
+            "override_neuron_config": {
+                "is_prefix_caching": True,
+                "is_block_kv_layout": True,
+                "pa_num_blocks": 128,
+                "pa_block_size": 128
+            }
+        },
     )
 
     prompts = [
