@@ -13,7 +13,6 @@ Mini-SGLang-Neuron is a compact implementation of [SGLang](https://github.com/sg
 - **Advanced Optimizations**:
   - **Radix Cache**: Reuses KV cache for shared prefixes across requests.
   - **Chunked Prefill**: Reduces peak memory usage for long-context serving.
-  - **Overlap Scheduling**: Hides CPU scheduling overhead with GPU computation.
   - **Tensor Parallelism**: Scales inference across TP ranks.
   - **Kernel Acceleration**: Uses low-level kernels where needed (e.g., radix cache key comparison).
   - ...
@@ -89,8 +88,9 @@ python -m minisgl \
   --dtype bfloat16 \
   --tp-size "$TP_SIZE" \
   --max-running-requests 6 \
-  --max-seq-len-override 4096 \
-  --num-pages 10192 \
+  --max-prefill-length 8192 \
+  --max-seq-len-override 2048 \
+  --num-pages 16384 \
   --port 1919
 ```
 
@@ -150,6 +150,7 @@ python -m minisgl \
   --dtype bfloat16 \
   --tp-size "$TP_SIZE" \
   --max-running-requests 6 \
+  --max-prefill-length 8192 \
   --max-seq-len-override 2048 \
   --num-pages 16384 \
   --port 1919 \
