@@ -15,6 +15,7 @@ def main():
     max_input_len = 1024
     max_output_len = 1024
 
+    # vllm-neurion (no prefix caching)
     llm = LLM(
         model="Qwen/Qwen3-0.6B",
         trust_remote_code=True,
@@ -22,19 +23,25 @@ def main():
         tensor_parallel_size=tp_size,
         max_num_seqs=6,
         max_model_len=2048,
-        enable_chunked_prefill=False,
         max_num_batched_tokens=8192,
         block_size=128,
-        num_gpu_blocks_override=128,
-        additional_config={
-            "override_neuron_config": {
-                "is_prefix_caching": True,
-                "is_block_kv_layout": True,
-                "pa_num_blocks": 128,
-                "pa_block_size": 128
-            }
-        },
+        num_gpu_blocks_override=9,
+        enable_prefix_caching=False,
     )
+
+    # vllm-neurion (prefix caching)
+    # llm = LLM(
+    #     model="Qwen/Qwen3-0.6B",
+    #     trust_remote_code=True,
+    #     dtype="bfloat16",
+    #     tensor_parallel_size=tp_size,
+    #     max_num_seqs=6,
+    #     max_model_len=2048,
+    #     max_num_batched_tokens=8192,
+    #     block_size=128,
+    #     num_gpu_blocks_override=128,
+    #     enable_prefix_caching=True,
+    # )
 
     prompts = [
         TokensPrompt(

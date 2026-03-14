@@ -12,11 +12,13 @@ def main():
     seed(0)
     tp_size = 2
     os.environ["NEURON_RT_NUM_CORES"] = str(tp_size)
+
     num_seqs = 256
     max_input_len = 1024
     max_ouput_len = 1024
 
     # align the hyperparameters
+    # mini-sglang-neurion (no radix)
     llm = LLM(
         "Qwen/Qwen3-0.6B",
         max_seq_len_override=2048, 
@@ -24,7 +26,19 @@ def main():
         tp_size=tp_size, 
         num_page_override=16384,
         max_extend_tokens=8192,
+        cache_type="naive",
     )
+    
+    # mini-sglang-neurion (radix)
+    # llm = LLM(
+    #     "Qwen/Qwen3-0.6B",
+    #     max_seq_len_override=2048, 
+    #     max_running_req=6,
+    #     tp_size=tp_size, 
+    #     num_page_override=16384,
+    #     max_extend_tokens=8192,
+    #     cache_type="radix",
+    # )
 
     prompt_token_ids = [
         [randint(0, 10000) for _ in range(randint(100, max_input_len))] for _ in range(num_seqs)

@@ -142,7 +142,7 @@ Test Configuration:
 Server startup command for `mini-sglang-neuron`: see [server.sh](./server.sh).
 
 ```bash
-# Mini-SGLang
+# mini-sglang-neuron (no radix)
 export TP_SIZE=2
 export NEURON_RT_NUM_CORES="${TP_SIZE}"
 python -m minisgl \
@@ -150,40 +150,57 @@ python -m minisgl \
   --dtype bfloat16 \
   --tp-size "$TP_SIZE" \
   --max-running-requests 6 \
-  --max-prefill-length 8192 \
+  --max-prefill-length 256 \
   --max-seq-len-override 2048 \
   --num-pages 16384 \
   --port 1919 \
-  --cache-type naive
+  --cache-type naive # Change to "radix"  
+
+# mini-sglang-neuron (radix)
+export TP_SIZE=2
+export NEURON_RT_NUM_CORES="${TP_SIZE}"
+python -m minisgl \
+  --model-path Qwen/Qwen3-0.6B \
+  --dtype bfloat16 \
+  --tp-size "$TP_SIZE" \
+  --max-running-requests 6 \
+  --max-prefill-length 256 \
+  --max-seq-len-override 2048 \
+  --num-pages 16384 \
+  --port 1919 \
+  --cache-type radix
 ```
 
 Server startup command for `vllm-neuron`.
 
 ```bash
-ADDITIONAL_CONFIG=$(cat <<'EOF'
-{
-  "override_neuron_config": {
-    "is_prefix_caching": true,
-    "is_block_kv_layout": true,
-    "pa_num_blocks": 128,
-    "pa_block_size": 128
-  }
-}
-EOF
-)
+# vllm-neuron (no prefix caching)
+export TP_SIZE=2
+export NEURON_RT_NUM_CORES="${TP_SIZE}"
 
-# Note that chunked prefill is not supported as of 0.4.1
 vllm serve Qwen/Qwen3-0.6B \
   --dtype bfloat16 \
   --tensor-parallel-size "${TP_SIZE}" \
   --max-num-seqs 6 \
   --max-model-len 2048 \
   --port 1919 \
-  --no-enable-chunked-prefill \
-  --max-num-batched-tokens 8192 \
+  --max-num-batched-tokens 256 \
   --block-size 128 \
-  --num-gpu-blocks-override 128 \
-  --additional-config "${ADDITIONAL_CONFIG}"
+  --num-gpu-blocks-override 6 \
+  --no-enable-prefix-caching 
+
+# vllm-neuron (prefix caching)
+export TP_SIZE=2
+export NEURON_RT_NUM_CORES="${TP_SIZE}"
+vllm serve Qwen/Qwen3-0.6B \
+  --dtype bfloat16 \
+  --tensor-parallel-size "${TP_SIZE}" \
+  --max-num-seqs 6 \
+  --max-model-len 2048 \
+  --port 1919 \
+  --max-num-batched-tokens 256 \
+  --block-size 128 \
+  --num-gpu-blocks-override 128
 ```
 
 Client command:

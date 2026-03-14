@@ -236,12 +236,18 @@ async def benchmark_one(
             extra_body=kwargs,
         )
         tics = [time.perf_counter()]
-        async for _ in response:
+        chunks = []
+        async for event in response:
             tics.append(time.perf_counter())
+            delta = event.choices[0].delta
+            if getattr(delta, "content", None):
+                chunks.append(delta.content)
             if len(tics) == 2:
                 pbar.update_prefill()
             elif len(tics) <= output_length + 1:
                 pbar.update_decode()
+        full_response = "".join(chunks)
+        #print(f"xinux - {full_response=}")
         return RawResult(
             input_len=input_length,
             output_len=output_length,

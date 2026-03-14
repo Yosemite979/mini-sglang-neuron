@@ -320,17 +320,10 @@ class Scheduler(SchedulerIOMixin):
 
     @torch.no_grad()
     def run_forever(self) -> NoReturn:
-        if ENV.DISABLE_OVERLAP_SCHEDULING:
-            logger.info("Starting normal scheduling loop...")
-            while True:
-                self.normal_loop()
-        else:
-            logger.info("Starting overlap scheduling loop...")
-            data = None
-            # TODO: NxDI does not support async execution now, so the overlap is not significant.
-            #   In the future, we can explore NxDI for async execution and further optimize the overlap.
-            while True:
-                data = self.overlap_loop(data)
+        while True:
+            self.normal_loop()
+        # TODO: NxDI does not support async execution now, so the overlap is not significant.
+        #   In the future, we can explore NxDI for async execution and further optimize the overlap.
 
     def shutdown(self) -> None:
         torch_xla.sync()
