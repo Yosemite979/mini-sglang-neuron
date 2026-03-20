@@ -64,7 +64,7 @@ class NeuronInputBuilder:
                 tokens = batch.input_ids[offset : offset + dev_len]
                 input_tokens[i, :dev_len] = tokens
                 position_ids[i, :dev_len] = torch.arange(0, dev_len, dtype=torch.int32, device=device)
-                block_tables[i, :dev_len] = self._build_block_tables(req)
+                block_tables[i, :dev_len] = self.page_table[req.table_idx, :dev_len]
                 slot_mapping[i, : (dev_len - cached_len)] = block_tables[i, cached_len:dev_len]
                 offset += dev_len
             input_block_ids[i] = req.table_idx
@@ -124,7 +124,7 @@ class NeuronInputBuilder:
                 position_ids[i, :ext_len] = torch.arange(
                     cached_len, cached_len + ext_len, dtype=torch.int32, device=device
                 )
-                block_tables[i, :dev_len] = self._build_block_tables(req)
+                block_tables[i, :dev_len] = self.page_table[req.table_idx, :dev_len]
                 slot_mapping[i, :ext_len] = block_tables[i, cached_len : cached_len + ext_len]
                 offset += ext_len
                 input_block_ids[i] = req.table_idx
@@ -148,6 +148,3 @@ class NeuronInputBuilder:
             full_context_lens=full_context_lens,
             computed_context_lens=computed_context_lens,
         )
-
-    def _build_block_tables(self, req) -> torch.Tensor:
-        return self.page_table[req.table_idx, : req.device_len].clone()
