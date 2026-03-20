@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import copy
 from dataclasses import dataclass
 import torch
 
@@ -151,4 +150,4 @@ class NeuronInputBuilder:
         )
 
     def _build_block_tables(self, req) -> torch.Tensor:
-        return copy.deepcopy(self.page_table[req.table_idx, : req.device_len])
+        return self.page_table[req.table_idx, : req.device_len].clone()

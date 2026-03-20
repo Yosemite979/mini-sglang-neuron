@@ -34,9 +34,14 @@ class Req:
 
     def __post_init__(self) -> None:
         assert self.input_ids.is_cpu
-        self.device_len = len(self.input_ids)
-        self.max_device_len = len(self.input_ids) + self.output_len
+        init_len = len(self.input_ids)
+        self.device_len = init_len
+        self.max_device_len = init_len + self.output_len
         assert 0 <= self.cached_len < self.device_len <= self.max_device_len
+        if self.max_device_len > init_len:
+            input_ids = torch.empty(self.max_device_len, dtype=self.input_ids.dtype)
+            input_ids[:init_len].copy_(self.input_ids)
+            self.input_ids = input_ids
 
     @property
     def remain_len(self) -> int:
@@ -51,7 +56,7 @@ class Req:
         self.device_len += 1
 
     def append_host(self, next_token: torch.Tensor) -> None:
-        self.input_ids = torch.cat([self.input_ids, next_token])
+        self.input_ids[self.cached_len : self.cached_len + 1].copy_(next_token)
 
     def can_decode(self) -> bool:
         return self.remain_len > 0

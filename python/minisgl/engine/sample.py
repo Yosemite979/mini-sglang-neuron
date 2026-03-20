@@ -55,38 +55,59 @@ class Sampler:
 
     def _sample_cpu(self, logits: torch.Tensor, args: BatchSamplingArgs) -> torch.Tensor:
         assert args.temperatures is not None
-        output = torch.empty((logits.shape[0],), dtype=torch.int32)
-        temperatures = args.temperatures
-        top_k = args.top_k if args.top_k is not None else None
-        top_p = args.top_p if args.top_p is not None else None
+        logits = logits.float()
+        cpu_device = logits.device
+        temperatures = args.temperatures.to(device=cpu_device)
+        scaled_logits = logits / temperatures.unsqueeze(1)
 
-        for i in range(logits.shape[0]):
-            row = logits[i].float()
-            temperature = float(temperatures[i].item())
-            if temperature > 0:
-                row = row / temperature
+        batch_size, vocab_size = scaled_logits.shape
+        output = torch.empty((batch_size,), dtype=torch.int32, device=cpu_device)
 
-            k = int(top_k[i].item()) if top_k is not None else self.vocab_size
-            p = float(top_p[i].item()) if top_p is not None else 1.0
+        top_k = (
+            args.top_k.to(device=cpu_device, dtype=torch.int64)
+            if args.top_k is not None
+            else torch.full((batch_size,), vocab_size, dtype=torch.int64, device=cpu_device)
+        )
+        top_p = (
+            args.top_p.to(device=cpu_device)
+            if args.top_p is not None
+            else torch.ones((batch_size,), dtype=torch.float32, device=cpu_device)
+        )
 
-            if k > 0 and k < row.numel():
-                topk = torch.topk(row, k=k)
-                probs = torch.softmax(topk.values, dim=-1)
-                idx = torch.multinomial(probs, 1)
-                token = topk.indices[idx]
-            elif p < 1.0:
-                probs = torch.softmax(row, dim=-1)
-                sorted_probs, sorted_idx = torch.sort(probs, descending=True)
-                cumulative = torch.cumsum(sorted_probs, dim=-1)
-                mask = cumulative <= p
-                mask[0] = True
-                filtered_probs = sorted_probs[mask]
-                filtered_idx = sorted_idx[mask]
-                filtered_probs = filtered_probs / filtered_probs.sum()
-                idx = torch.multinomial(filtered_probs, 1)
-                token = filtered_idx[idx]
-            else:
-                token = torch.argmax(row, dim=-1)
+        topk_rows = (top_k > 0) & (top_k < vocab_size)
+        if topk_rows.any():
+            topk_indices = torch.nonzero(topk_rows, as_tuple=False).squeeze(1)
+            row_logits = scaled_logits[topk_indices]
+            row_top_k = top_k[topk_indices]
+            max_k = int(row_top_k.max().item())
 
-            output[i] = token.item()
+            topk_values, topk_tokens = torch.topk(row_logits, k=max_k, dim=-1)
+            valid = torch.arange(max_k, device=cpu_device).unsqueeze(0) < row_top_k.unsqueeze(1)
+            masked_values = topk_values.masked_fill(~valid, float("-inf"))
+            probs = torch.softmax(masked_values, dim=-1)
+            sampled = torch.multinomial(probs, 1)
+            output[topk_indices] = torch.gather(topk_tokens, 1, sampled).squeeze(1).to(torch.int32)
+
+        topp_rows = (~topk_rows) & (top_p < 1.0)
+        if topp_rows.any():
+            topp_indices = torch.nonzero(topp_rows, as_tuple=False).squeeze(1)
+            row_logits = scaled_logits[topp_indices]
+            row_top_p = top_p[topp_indices]
+
+            probs = torch.softmax(row_logits, dim=-1)
+            sorted_probs, sorted_tokens = torch.sort(probs, dim=-1, descending=True)
+            cumulative = torch.cumsum(sorted_probs, dim=-1)
+            valid = cumulative <= row_top_p.unsqueeze(1)
+            valid[:, 0] = True
+
+            filtered_probs = sorted_probs.masked_fill(~valid, 0.0)
+            filtered_probs = filtered_probs / filtered_probs.sum(dim=-1, keepdim=True)
+            sampled = torch.multinomial(filtered_probs, 1)
+            output[topp_indices] = torch.gather(sorted_tokens, 1, sampled).squeeze(1).to(torch.int32)
+
+        greedy_rows = ~(topk_rows | topp_rows)
+        if greedy_rows.any():
+            greedy_indices = torch.nonzero(greedy_rows, as_tuple=False).squeeze(1)
+            output[greedy_indices] = torch.argmax(scaled_logits[greedy_indices], dim=-1).to(torch.int32)
+
         return output
