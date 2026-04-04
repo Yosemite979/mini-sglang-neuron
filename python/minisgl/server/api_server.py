@@ -216,14 +216,19 @@ class FrontendManager:
             normal_text, tool_calls = parse_tool_calls(full_text)
 
             if tool_calls:
-                msg = {"role": "assistant", "content": normal_text, "tool_calls": tool_calls}
-                resp = {
-                    "id": cmpl_id, "object": "chat.completion", "created": created,
+                delta = {"role": "assistant", "content": normal_text or "", "tool_calls": tool_calls}
+                chunk = {
+                    "id": cmpl_id, "object": "chat.completion.chunk", "created": created,
                     "model": self.config.model_path,
-                    "choices": [{"index": 0, "message": msg, "finish_reason": "tool_calls"}],
-                    "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+                    "choices": [{"delta": delta, "index": 0, "finish_reason": None}],
                 }
-                yield f"data: {json.dumps(resp)}\n\n".encode()
+                yield f"data: {json.dumps(chunk)}\n\n".encode()
+                end_chunk = {
+                    "id": cmpl_id, "object": "chat.completion.chunk", "created": created,
+                    "model": self.config.model_path,
+                    "choices": [{"delta": {"content": ""}, "index": 0, "finish_reason": "tool_calls"}],
+                }
+                yield f"data: {json.dumps(end_chunk)}\n\n".encode()
                 yield b"data: [DONE]\n\n"
                 return
             else:
