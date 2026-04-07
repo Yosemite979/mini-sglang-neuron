@@ -17,6 +17,7 @@ class ServerArgs(SchedulerConfig):
     server_port: int = 1919
     num_tokenizer: int = 0
     silent_output: bool = False
+    max_req_per_min: Optional[int] = None
 
     @property
     def share_tokenizer(self) -> bool:
@@ -174,7 +175,12 @@ def parse_args(args: List[str], run_shell: bool = False) -> Tuple[ServerArgs, bo
         action="store_true",
         help="Run the server in shell mode.",
     )
-
+    parser.add_argument(
+        "--max-req-per-min",
+        type=int,
+        default=None,
+        help="Maximum number of requests by IP address",
+    )
     # Parse arguments
     kwargs = parser.parse_args(args).__dict__.copy()
 

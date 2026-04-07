@@ -10,6 +10,7 @@ from typing import Callable, Dict, List, Literal, Tuple
 
 import uvicorn
 from fastapi import FastAPI
+from fastapi import Request
 from fastapi.responses import StreamingResponse
 from minisgl.core import SamplingParams
 from minisgl.env import ENV
@@ -27,6 +28,14 @@ from pydantic import BaseModel, Field
 from starlette.background import BackgroundTask
 
 from .args import ServerArgs
+
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+from starlette.responses import JSONResponse
+
+limiter = Limiter(key_func = get_remote_address)
+_MAX_REQ_PER_MIN = None
 
 logger = init_logger(__name__, "FrontendAPI")
 
@@ -222,10 +231,13 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="MiniSGL API Server", version="0.0.1", lifespan=lifespan)
-
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 @app.post("/generate")
-async def generate(req: GenerateRequest):
+@limiter.limit(lambda: f"{_MAX_REQ_PER_MIN}/minute"
+             if _MAX_REQ_PER_MIM  else "1000/minute")
+async def generate( request: Request, req: GenerateRequest):
     logger.debug("Received generate request %s", req)
     state = get_global_state()
     uid = state.new_user()
@@ -256,7 +268,9 @@ async def v1_root():
 
 
 @app.post("/v1/chat/completions")
-async def v1_completions(req: OpenAICompletionRequest):
+@limiter.limit(lambda: f"{_MAX_REQ_PER_MIN}/minute"
+              if _MAX_REQ_PER_MIN else "1000/minute")
+async def v1_completions(request: Request, req:  GenerateRequest):
     state = get_global_state()
     if req.messages:
         prompt = [msg.model_dump() for msg in req.messages]
@@ -406,6 +420,10 @@ def run_api_server(config: ServerArgs, start_backend: Callable[[], None], run_sh
     """
 
     global _GLOBAL_STATE
+    global _MAX_REQ_PER_MIN
+    _MAX_REQ_PER_MINE = config.max_req_per_min
+
+  
 
     if run_shell:
         assert not config.use_dummy_weight, "Shell mode does not support dummy weights."
