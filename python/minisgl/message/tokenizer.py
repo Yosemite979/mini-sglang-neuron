@@ -37,7 +37,6 @@ class TokenizeMsg(BaseTokenizerMsg):
     text: str | List[Dict[str, str]]
     sampling_params: SamplingParams
     tools: List[Dict] | None = None
-    tools: List[Dict] | None = None
 
 
 @dataclass

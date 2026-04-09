@@ -96,18 +96,25 @@ class Message(BaseModel):
 
 
 class OpenAICompletionRequest(BaseModel):
+    """Unified request model for OpenAI-style completions and chat-completions."""
+
     model: str
-    prompt: Optional[str] = None
-    messages: Optional[List[Message]] = None
-    max_tokens: Optional[int] = None
-    temperature: Optional[float] = None
-    top_k: Optional[int] = None
-    top_p: Optional[float] = None
+
+    prompt: str | None = None
+    messages: List[Message] | None = None
+
+    # Use optional fields so endpoints can apply unified defaults when omitted.
+    max_tokens: int | None = None
+    temperature: float | None = None
+
+    top_k: int | None = None
+    top_p: float | None = None
     n: int = 1
     stream: bool = False
     stop: List[str] = []
     presence_penalty: float = 0.0
     frequency_penalty: float = 0.0
+
     ignore_eos: bool = False
     tools: Optional[List[ToolDef]] = None
     tool_choice: Union[str, Dict, None] = None
@@ -180,9 +187,11 @@ class FrontendManager:
 
     async def wait_for_ack(self, uid: int):
         event = self.event_map[uid]
+
         while True:
             await event.wait()
             event.clear()
+
             pending = self.ack_map[uid]
             self.ack_map[uid] = []
             ack = None
@@ -206,6 +215,7 @@ class FrontendManager:
             if ack.finished:
                 break
         yield "data: [DONE]\n".encode()
+        logger.debug("Finished streaming response for user %s", uid)
 
     async def stream_chat_completions(self, uid: int, has_tools: bool = False):
         cmpl_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
@@ -259,6 +269,7 @@ class FrontendManager:
             if ack.finished:
                 break
 
+        # send final finish_reason
         end_chunk = {
             "id": cmpl_id, "object": "chat.completion.chunk", "created": created,
             "model": self.config.model_path,
@@ -273,6 +284,7 @@ class FrontendManager:
             del self.ack_map[uid]
         if uid in self.event_map:
             del self.event_map[uid]
+        logger.warning("Aborting request for user %s", uid)
 
     def shutdown(self):
         self.send_tokenizer.stop()
@@ -282,6 +294,7 @@ class FrontendManager:
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     yield
+    # shutdown code here
     global _GLOBAL_STATE
     if _GLOBAL_STATE is not None:
         _GLOBAL_STATE.shutdown()
@@ -329,6 +342,7 @@ async def v1_completions(request: Request, req: OpenAICompletionRequest):
 
     tools_for_tpl = _tools_for_template(req) if has_tools else None
 
+    # TODO: support more sampling parameters
     uid = state.new_user()
     await state.send_one(
         TokenizeMsg(
@@ -443,26 +457,44 @@ async def shell():
 
 
 def run_api_server(config: ServerArgs, start_backend: Callable[[], None], run_shell: bool) -> None:
+    """
+    Run the frontend API server (FastAPI + uvicorn) and wire it to the tokenizer process via ZMQ.
+
+    Args:
+        config: Server configuration (host/port, ZMQ IPC addresses, etc).
+        start_backend: Callback that launches the backend worker processes (TP schedulers +
+            tokenizer/detokenizer).
+        run_shell: If True, run an interactive terminal shell instead of starting uvicorn.
+    """
+
     global _GLOBAL_STATE
     global _MAX_REQ_PER_MIN
     _MAX_REQ_PER_MIN = config.max_req_per_min
 
     if run_shell:
-        assert not config.use_dummy_weight
+        assert not config.use_dummy_weight, "Shell mode does not support dummy weights."
+
     host = config.server_host
     port = config.server_port
-    assert _GLOBAL_STATE is None
+
+    assert _GLOBAL_STATE is None, "Global state is already initialized"
     _GLOBAL_STATE = FrontendManager(
         config=config,
         recv_tokenizer=ZmqAsyncPullQueue(
-            config.zmq_frontend_addr, create=True, decoder=BaseFrontendMsg.decoder,
+            config.zmq_frontend_addr,
+            create=True,
+            decoder=BaseFrontendMsg.decoder,
         ),
         send_tokenizer=ZmqAsyncPushQueue(
-            config.zmq_tokenizer_addr, create=config.frontend_create_tokenizer_link,
+            config.zmq_tokenizer_addr,
+            create=config.frontend_create_tokenizer_link,
             encoder=BaseTokenizerMsg.encoder,
         ),
     )
+
+    # start the backend here
     start_backend()
+
     logger.info(f"API server is ready to serve on {host}:{port}")
     if not run_shell:
         uvicorn.run(app, host=host, port=port)
