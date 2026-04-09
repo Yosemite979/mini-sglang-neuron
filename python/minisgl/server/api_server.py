@@ -4,14 +4,15 @@ import asyncio
 import json
 import sys
 import time
+import uuid
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from typing import Callable, Dict, List, Literal, Tuple
+from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, Union
 
 import uvicorn
 from fastapi import FastAPI
 from fastapi import Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from minisgl.core import SamplingParams
 from minisgl.env import ENV
 from minisgl.message import (
@@ -28,13 +29,13 @@ from pydantic import BaseModel, Field
 from starlette.background import BackgroundTask
 
 from .args import ServerArgs
+from .tool_parser import parse_tool_calls
 
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
-from starlette.responses import JSONResponse
 
-limiter = Limiter(key_func = get_remote_address)
+limiter = Limiter(key_func=get_remote_address)
 _MAX_REQ_PER_MIN = None
 
 logger = init_logger(__name__, "FrontendAPI")
@@ -65,9 +66,33 @@ class GenerateRequest(BaseModel):
     ignore_eos: bool = False
 
 
+class FunctionDef(BaseModel):
+    name: str
+    description: str = ""
+    parameters: Optional[Dict[str, Any]] = None
+
+
+class ToolDef(BaseModel):
+    type: str = "function"
+    function: FunctionDef
+
+
+class ToolCallFunction(BaseModel):
+    name: str
+    arguments: str
+
+
+class ToolCallObj(BaseModel):
+    id: str = ""
+    type: str = "function"
+    function: ToolCallFunction
+
+
 class Message(BaseModel):
-    role: Literal["system", "user", "assistant"]
-    content: str
+    role: Literal["system", "user", "assistant", "tool"]
+    content: Optional[str] = None
+    tool_calls: Optional[List[ToolCallObj]] = None
+    tool_call_id: Optional[str] = None
 
 
 class OpenAICompletionRequest(BaseModel):
@@ -91,6 +116,8 @@ class OpenAICompletionRequest(BaseModel):
     frequency_penalty: float = 0.0
 
     ignore_eos: bool = False
+    tools: Optional[List[ToolDef]] = None
+    tool_choice: Union[str, Dict, None] = None
 
 
 class ModelCard(BaseModel):
@@ -116,6 +143,12 @@ def _sampling_params_from_request(req: OpenAICompletionRequest) -> SamplingParam
         top_k=req.top_k if req.top_k is not None else ENV.SHELL_TOP_K.value,
         top_p=req.top_p if req.top_p is not None else ENV.SHELL_TOP_P.value,
     )
+
+
+def _tools_for_template(req: OpenAICompletionRequest) -> Optional[List[Dict]]:
+    if not req.tools or req.tool_choice == "none":
+        return None
+    return [t.model_dump() for t in req.tools]
 
 
 @dataclass
@@ -166,9 +199,15 @@ class FrontendManager:
                 yield ack
             if ack and ack.finished:
                 break
-
         del self.ack_map[uid]
         del self.event_map[uid]
+
+    async def collect_full_response(self, uid: int) -> str:
+        full = []
+        async for ack in self.wait_for_ack(uid):
+            if ack.incremental_output:
+                full.append(ack.incremental_output)
+        return "".join(full)
 
     async def stream_generate(self, uid: int):
         async for ack in self.wait_for_ack(uid):
@@ -178,7 +217,41 @@ class FrontendManager:
         yield "data: [DONE]\n".encode()
         logger.debug("Finished streaming response for user %s", uid)
 
-    async def stream_chat_completions(self, uid: int):
+    async def stream_chat_completions(self, uid: int, has_tools: bool = False):
+        cmpl_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
+        created = int(time.time())
+
+        if has_tools:
+            full_text = await self.collect_full_response(uid)
+            normal_text, tool_calls = parse_tool_calls(full_text)
+
+            if tool_calls:
+                delta = {"role": "assistant", "content": normal_text or "", "tool_calls": tool_calls}
+                chunk = {
+                    "id": cmpl_id, "object": "chat.completion.chunk", "created": created,
+                    "model": self.config.model_path,
+                    "choices": [{"delta": delta, "index": 0, "finish_reason": None}],
+                }
+                yield f"data: {json.dumps(chunk)}\n\n".encode()
+                end_chunk = {
+                    "id": cmpl_id, "object": "chat.completion.chunk", "created": created,
+                    "model": self.config.model_path,
+                    "choices": [{"delta": {"content": ""}, "index": 0, "finish_reason": "tool_calls"}],
+                }
+                yield f"data: {json.dumps(end_chunk)}\n\n".encode()
+                yield b"data: [DONE]\n\n"
+                return
+            else:
+                delta = {"role": "assistant", "content": full_text}
+                chunk = {
+                    "id": cmpl_id, "object": "chat.completion.chunk", "created": created,
+                    "model": self.config.model_path,
+                    "choices": [{"delta": delta, "index": 0, "finish_reason": "stop"}],
+                }
+                yield f"data: {json.dumps(chunk)}\n\n".encode()
+                yield b"data: [DONE]\n\n"
+                return
+
         first_chunk = True
         async for ack in self.wait_for_ack(uid):
             delta = {}
@@ -187,26 +260,23 @@ class FrontendManager:
                 first_chunk = False
             if ack.incremental_output:
                 delta["content"] = ack.incremental_output
-
             chunk = {
-                "id": f"cmpl-{uid}",
-                "object": "text_completion.chunk",
+                "id": cmpl_id, "object": "chat.completion.chunk", "created": created,
+                "model": self.config.model_path,
                 "choices": [{"delta": delta, "index": 0, "finish_reason": None}],
             }
             yield f"data: {json.dumps(chunk)}\n\n".encode()
-
             if ack.finished:
                 break
 
         # send final finish_reason
         end_chunk = {
-            "id": f"cmpl-{uid}",
-            "object": "text_completion.chunk",
+            "id": cmpl_id, "object": "chat.completion.chunk", "created": created,
+            "model": self.config.model_path,
             "choices": [{"delta": {}, "index": 0, "finish_reason": "stop"}],
         }
         yield f"data: {json.dumps(end_chunk)}\n\n".encode()
         yield b"data: [DONE]\n\n"
-        logger.debug("Finished streaming response for user %s", uid)
 
     async def abort_user(self, uid: int):
         await asyncio.sleep(0.1)
@@ -230,35 +300,25 @@ async def lifespan(_: FastAPI):
         _GLOBAL_STATE.shutdown()
 
 
-app = FastAPI(title="MiniSGL API Server", version="0.0.1", lifespan=lifespan)
+app = FastAPI(title="MiniSGL API Server", version="0.1.0", lifespan=lifespan)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
+
 @app.post("/generate")
 @limiter.limit(lambda: f"{_MAX_REQ_PER_MIN}/minute"
-             if _MAX_REQ_PER_MIM  else "1000/minute")
-async def generate( request: Request, req: GenerateRequest):
+               if _MAX_REQ_PER_MIN else "1000/minute")
+async def generate(request: Request, req: GenerateRequest):
     logger.debug("Received generate request %s", req)
     state = get_global_state()
     uid = state.new_user()
     await state.send_one(
-        TokenizeMsg(
-            uid=uid,
-            text=req.prompt,
-            sampling_params=SamplingParams(
-                ignore_eos=req.ignore_eos,
-                max_tokens=req.max_tokens,
-            ),
-        )
+        TokenizeMsg(uid=uid, text=req.prompt, sampling_params=SamplingParams(
+            ignore_eos=req.ignore_eos, max_tokens=req.max_tokens))
     )
-
-    async def _abort():
-        await state.abort_user(uid)
-
     return StreamingResponse(
-        state.stream_generate(uid),
-        media_type="text/event-stream",
-        background=BackgroundTask(lambda: _abort),
+        state.stream_generate(uid), media_type="text/event-stream",
+        background=BackgroundTask(lambda: state.abort_user(uid)),
     )
 
 
@@ -269,32 +329,50 @@ async def v1_root():
 
 @app.post("/v1/chat/completions")
 @limiter.limit(lambda: f"{_MAX_REQ_PER_MIN}/minute"
-              if _MAX_REQ_PER_MIN else "1000/minute")
-async def v1_completions(request: Request, req:  GenerateRequest):
+               if _MAX_REQ_PER_MIN else "1000/minute")
+async def v1_completions(request: Request, req: OpenAICompletionRequest):
     state = get_global_state()
+    has_tools = bool(req.tools and req.tool_choice != "none")
+
     if req.messages:
-        prompt = [msg.model_dump() for msg in req.messages]
+        prompt = [msg.model_dump(exclude_none=True) for msg in req.messages]
     else:
-        assert req.prompt is not None, "Either 'messages' or 'prompt' must be provided"
+        assert req.prompt is not None
         prompt = req.prompt
+
+    tools_for_tpl = _tools_for_template(req) if has_tools else None
 
     # TODO: support more sampling parameters
     uid = state.new_user()
     await state.send_one(
         TokenizeMsg(
-            uid=uid,
-            text=prompt,
+            uid=uid, text=prompt,
             sampling_params=_sampling_params_from_request(req),
+            tools=tools_for_tpl,
         )
     )
 
-    async def _abort():
-        await state.abort_user(uid)
+    if not req.stream:
+        full_text = await state.collect_full_response(uid)
+        normal_text, tool_calls = parse_tool_calls(full_text)
+        cmpl_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
+        if tool_calls:
+            msg = {"role": "assistant", "content": normal_text, "tool_calls": tool_calls}
+            finish = "tool_calls"
+        else:
+            msg = {"role": "assistant", "content": full_text}
+            finish = "stop"
+        return JSONResponse({
+            "id": cmpl_id, "object": "chat.completion", "created": int(time.time()),
+            "model": state.config.model_path,
+            "choices": [{"index": 0, "message": msg, "finish_reason": finish}],
+            "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+        })
 
     return StreamingResponse(
-        state.stream_chat_completions(uid),
+        state.stream_chat_completions(uid, has_tools=has_tools),
         media_type="text/event-stream",
-        background=BackgroundTask(lambda: _abort),
+        background=BackgroundTask(lambda: state.abort_user(uid)),
     )
 
 
@@ -306,38 +384,16 @@ async def available_models():
 
 async def shell_completion(req: OpenAICompletionRequest):
     state = get_global_state()
-    assert req.messages is not None, "Shell completion only supports chat-completions"
-    prompt = [msg.model_dump() for msg in req.messages]
-
-    # TODO: support more sampling parameters
+    assert req.messages is not None
+    prompt = [msg.model_dump(exclude_none=True) for msg in req.messages]
     uid = state.new_user()
     await state.send_one(
-        TokenizeMsg(
-            uid=uid,
-            text=prompt,
-            sampling_params=_sampling_params_from_request(req),
-        )
+        TokenizeMsg(uid=uid, text=prompt, sampling_params=_sampling_params_from_request(req))
     )
-
-    async def _abort():
-        await state.abort_user(uid)
-
     return StreamingResponse(
-        state.stream_generate(uid),
-        media_type="text/event-stream",
-        background=BackgroundTask(lambda: _abort),
+        state.stream_generate(uid), media_type="text/event-stream",
+        background=BackgroundTask(lambda: state.abort_user(uid)),
     )
-
-
-async def read_stdin():
-    loop = asyncio.get_running_loop()
-    reader = asyncio.StreamReader()
-    protocol = asyncio.StreamReaderProtocol(reader)
-    await loop.connect_read_pipe(lambda: protocol, sys.stdin)
-
-    while True:
-        line = await reader.readline()
-        line = line.decode().rstrip("\n")
 
 
 async def async_input(prompt=""):
@@ -349,11 +405,9 @@ async def shell():
     commands = ["/exit", "/reset"]
     completer = WordCompleter(commands)
     session = PromptSession("$ ", completer=completer)
-
     try:
         history: List[Tuple[str, str]] = []
         while True:
-            need_stop = False
             cmd = (await session.prompt_async()).strip()
             if cmd == "":
                 continue
@@ -368,7 +422,6 @@ async def shell():
             for user_msg, assistant_msg in history:
                 history_messages.append(Message(role="user", content=user_msg))
                 history_messages.append(Message(role="assistant", content=assistant_msg))
-            # send to server
             req = OpenAICompletionRequest(
                 model="",
                 messages=history_messages + [Message(role="user", content=cmd)],
@@ -380,9 +433,7 @@ async def shell():
             )
             cur_msg = ""
             async for chunk in (await shell_completion(req)).body_iterator:
-                if need_stop:
-                    break
-                msg = chunk.decode()  # type: ignore
+                msg = chunk.decode()
                 assert msg.startswith("data: "), msg
                 msg = msg[6:]
                 assert msg.endswith("\n"), msg
@@ -394,15 +445,12 @@ async def shell():
             print("", flush=True)
             history.append((cmd, cur_msg))
     except EOFError:
-        # user pressed Ctrl-D
         pass
     finally:
         print("Exiting shell...")
         await asyncio.sleep(0.1)
         get_global_state().shutdown()
-        # then kill all the subprocesses
         import psutil
-
         parent = psutil.Process()
         for child in parent.children(recursive=True):
             child.kill()
@@ -421,9 +469,7 @@ def run_api_server(config: ServerArgs, start_backend: Callable[[], None], run_sh
 
     global _GLOBAL_STATE
     global _MAX_REQ_PER_MIN
-    _MAX_REQ_PER_MINE = config.max_req_per_min
-
-  
+    _MAX_REQ_PER_MIN = config.max_req_per_min
 
     if run_shell:
         assert not config.use_dummy_weight, "Shell mode does not support dummy weights."
